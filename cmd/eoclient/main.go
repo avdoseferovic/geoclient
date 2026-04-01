@@ -9,7 +9,7 @@ import (
 	"os"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
 
 	"github.com/avdo/eoweb/internal/game"
 	"github.com/avdo/eoweb/internal/gfx"
@@ -30,10 +30,12 @@ func main() {
 
 	loader := gfx.NewLoader(gfxDir)
 	g := &Game{
-		client:      game.NewClient(),
-		handlers:    game.NewHandlerRegistry(),
-		gfxLoad:     loader,
-		mapRenderer: render.NewMapRenderer(loader),
+		client:       game.NewClient(),
+		handlers:     game.NewHandlerRegistry(),
+		gfxLoad:      loader,
+		mapRenderer:  render.NewMapRenderer(loader),
+		overlay:      newOverlayState(),
+		connectArmed: true,
 	}
 	game.RegisterAllHandlers(g.handlers)
 
@@ -52,8 +54,11 @@ type Game struct {
 	handlers    *game.HandlerRegistry
 	gfxLoad     *gfx.Loader
 	mapRenderer *render.MapRenderer
+	overlay     overlayState
+	autoWalk    autoWalkPlan
 
 	connected    bool
+	connectArmed bool
 	connectError string
 
 	// Chat
@@ -66,9 +71,19 @@ type Game struct {
 	isWalking      bool // true while local player walk animation is playing
 }
 
+type worldHoverIntent struct {
+	TileX      int
+	TileY      int
+	CursorType int
+	Valid      bool
+}
+
 func (g *Game) Update() error {
+	g.updateOverlayState()
+
 	// Handle connection
-	if !g.connected && g.client.GetState() == game.StateInitial && g.connectError == "" {
+	if !g.connected && g.connectArmed && g.client.GetState() == game.StateInitial && g.connectError == "" {
+		g.overlay.statusMessage = "Contacting server..."
 		go g.connect()
 		g.connected = true
 	}
@@ -98,16 +113,14 @@ done:
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	switch g.client.GetState() {
-	case game.StateInitial:
-		g.drawConnecting(screen)
-	case game.StateConnected:
-		g.drawLogin(screen)
-	case game.StateLoggedIn:
-		g.drawCharacterSelect(screen)
-	case game.StateInGame:
-		g.drawInGame(screen)
+	if g.client.GetState() != game.StateInGame {
+		g.drawOverlayScreen(screen)
+		return
 	}
+
+	g.drawWorld(screen)
+	g.drawOverlayScreen(screen)
+
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
@@ -118,22 +131,19 @@ func (g *Game) connect() {
 	slog.Info("connecting", "addr", serverAddr)
 	conn, err := eonet.Dial(serverAddr)
 	if err != nil {
-		g.connectError = err.Error()
-		slog.Error("connect failed", "err", err)
-		g.connected = false
+		g.failConnection(fmt.Sprintf("Unable to reach server: %v", err), false)
 		return
 	}
 
 	bus := eonet.NewPacketBus(conn)
-	g.client.Bus = bus
+	g.client.SetBus(bus)
 
 	challenge := rand.Intn(11_092_110) + 1
 	g.client.Challenge = challenge
 
 	// Send init packet
 	if err := bus.SendPacket(newInitPacket(challenge, g.client.Version)); err != nil {
-		g.connectError = err.Error()
-		slog.Error("send init failed", "err", err)
+		g.failConnection(fmt.Sprintf("Handshake failed: %v", err), true)
 		return
 	}
 
@@ -143,23 +153,31 @@ func (g *Game) connect() {
 
 func (g *Game) recvLoop() {
 	for {
-		bus := g.client.Bus
+		bus := g.client.GetBus()
 		if bus == nil {
 			return
 		}
 
 		action, family, reader, err := bus.Recv()
 		if err != nil {
-			slog.Error("recv error", "err", err)
-			g.client.Disconnect()
-			g.connected = false
+			g.failConnection(fmt.Sprintf("Connection lost: %v", err), true)
 			return
 		}
 
 		if err := g.handlers.Dispatch(family, action, g.client, reader); err != nil {
-			slog.Error("handler error", "family", int(family), "action", int(action), "err", err)
+			g.failConnection(fmt.Sprintf("Network flow interrupted: %v", err), true)
+			return
 		}
 	}
+}
+
+func (g *Game) failConnection(message string, disconnectClient bool) {
+	slog.Error("connection failure", "msg", message)
+	g.client.EmitCritical(game.Event{
+		Type:    game.EventError,
+		Message: message,
+		Data:    disconnectClient,
+	})
 }
 
 func (g *Game) handleEvent(evt game.Event) {
@@ -167,39 +185,43 @@ func (g *Game) handleEvent(evt game.Event) {
 	case game.EventError:
 		slog.Error("game error", "msg", evt.Message)
 		g.connectError = evt.Message
+		g.connected = false
+		g.connectArmed = false
+		g.overlay.loginSubmitting = false
+		g.overlay.selectingCharacter = false
+		g.overlay.statusMessage = evt.Message
+		disconnectClient, _ := evt.Data.(bool)
+		if disconnectClient {
+			g.client.Disconnect()
+		}
 	case game.EventChat:
 		g.handleChatEvent(evt)
 	case game.EventStateChanged:
 		slog.Info("state changed", "state", evt.Message)
 		if evt.Message == "Connected" {
 			g.connectError = ""
+			g.overlay.statusMessage = "Connected. Awaiting login."
 		}
 	case game.EventEnterGame:
 		slog.Info("entered game")
+		g.clearAutoWalk()
+		g.overlay.activeMenuPanel = gameMenuPanelNone
 		g.facingDir = int(g.client.Character.Direction)
 		g.loadCurrentMap()
+		g.overlay.loginSubmitting = false
+		g.overlay.selectingCharacter = false
+		g.overlay.statusMessage = ""
 	case game.EventWarp:
 		slog.Info("warping", "mapID", evt.Data)
+		g.clearAutoWalk()
 		g.loadCurrentMap()
-	}
-}
-
-func (g *Game) updateLogin() {
-	// Auto-login for now (will be replaced with UI)
-	if g.client.Username == "" {
-		g.client.Username = "testbot1"
-		g.client.Password = "testpass"
-		g.sendLogin()
-	}
-}
-
-func (g *Game) updateCharacterSelect() {
-	// Auto-select first character
-	if len(g.client.Characters) > 0 {
-		charID := g.client.Characters[0].Id
-		slog.Info("selecting character", "id", charID)
-		g.sendSelectCharacter(charID)
-		g.client.Characters = nil // prevent re-selecting
+	case game.EventCharacterList:
+		g.overlay.loginSubmitting = false
+		g.overlay.selectingCharacter = false
+		if g.overlay.selectedCharacter >= len(g.client.Characters) {
+			g.overlay.selectedCharacter = 0
+		}
+		g.overlay.statusMessage = "Choose a character."
 	}
 }
 
@@ -222,18 +244,25 @@ func (g *Game) updateInGame() {
 	if g.attackCooldown > 0 {
 		g.attackCooldown--
 	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		if g.overlay.activeMenuPanel != gameMenuPanelNone {
+			g.overlay.activeMenuPanel = gameMenuPanelNone
+			return
+		}
+		g.clearAutoWalk()
+	}
+
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && g.handleInGameLeftClick() {
+		return
+	}
 
 	// Attack with Ctrl
 	if ebiten.IsKeyPressed(ebiten.KeyControlLeft) || ebiten.IsKeyPressed(ebiten.KeyControlRight) {
+		g.clearAutoWalk()
 		if g.attackCooldown <= 0 {
 			g.sendAttack()
 			g.attackCooldown = 18
 		}
-		return
-	}
-
-	// Don't accept new input while walking
-	if g.isWalking {
 		return
 	}
 
@@ -249,20 +278,138 @@ func (g *Game) updateInGame() {
 		dir = 3 // Right
 	}
 
-	if dir < 0 || g.walkCooldown > 0 {
+	if dir >= 0 {
+		g.clearAutoWalk()
+		if g.isWalking || g.walkCooldown > 0 {
+			return
+		}
+		g.faceOrWalk(dir)
 		return
 	}
 
-	if g.facingDir != dir {
-		// Different direction: just face, don't walk
-		g.facingDir = dir
-		g.sendFace(dir)
-		g.walkCooldown = 8 // short cooldown for face
-	} else {
-		// Already facing this direction: walk
-		g.startLocalWalk(dir)
-		g.walkCooldown = game.WalkDuration
+	if g.isWalking {
+		return
 	}
+
+	g.advanceAutoWalk()
+}
+
+func (g *Game) handleInGameLeftClick() bool {
+	if g.handleInGameOverlayClick() {
+		return true
+	}
+
+	hover := g.currentWorldHoverIntent()
+	if !hover.Valid || hover.CursorType < 0 {
+		g.clearAutoWalk()
+		return false
+	}
+
+	dir, ok := directionTowardTile(g.client.Character.X, g.client.Character.Y, hover.TileX, hover.TileY)
+	if !ok {
+		if hover.CursorType == 2 {
+			if itemUID, found := g.findPickupItemAtTile(hover.TileX, hover.TileY, 0); found {
+				g.clearAutoWalk()
+				g.sendPickupItem(itemUID)
+				return true
+			}
+		}
+		return false
+	}
+	g.clearAutoWalk()
+
+	if g.isAttackTargetTile(hover.TileX, hover.TileY) && isAdjacentTile(g.client.Character.X, g.client.Character.Y, hover.TileX, hover.TileY) {
+		return g.faceOrAttack(dir)
+	}
+
+	if hover.CursorType == 2 {
+		if g.client.Character.X == hover.TileX && g.client.Character.Y == hover.TileY {
+			if itemUID, found := g.findPickupItemAtTile(hover.TileX, hover.TileY, 0); found {
+				g.sendPickupItem(itemUID)
+				return true
+			}
+			return false
+		}
+		if itemUID, found := g.findPickupItemAtTile(hover.TileX, hover.TileY, 0); found {
+			return g.queueAutoPickup(hover.TileX, hover.TileY, itemUID)
+		}
+		return g.queueAutoWalkToTile(hover.TileX, hover.TileY)
+	}
+
+	if hover.CursorType == 1 {
+		if isAdjacentTile(g.client.Character.X, g.client.Character.Y, hover.TileX, hover.TileY) {
+			return g.faceOnly(dir)
+		}
+		return g.queueAutoWalkToInteraction(hover.TileX, hover.TileY)
+	}
+
+	if hover.TileX == g.client.Character.X && hover.TileY == g.client.Character.Y {
+		return false
+	}
+	return g.queueAutoWalkToTile(hover.TileX, hover.TileY)
+}
+
+func (g *Game) faceOrWalk(dir int) bool {
+	if dir < 0 || g.walkCooldown > 0 {
+		return false
+	}
+	if g.facingDir != dir {
+		return g.faceOnly(dir)
+	}
+	return g.stepToward(dir)
+}
+
+func (g *Game) faceOnly(dir int) bool {
+	if dir < 0 || g.walkCooldown > 0 {
+		return false
+	}
+	g.facingDir = dir
+	g.sendFace(dir)
+	g.walkCooldown = 8
+	return true
+}
+
+func (g *Game) stepToward(dir int) bool {
+	if dir < 0 || g.walkCooldown > 0 || g.isWalking {
+		return false
+	}
+	nextX, nextY := nextTileInDirection(g.client.Character.X, g.client.Character.Y, dir)
+	if !g.canStepTo(nextX, nextY) {
+		return g.faceOnly(dir)
+	}
+	if g.facingDir != dir {
+		return g.faceOnly(dir)
+	}
+	return g.walkImmediately(dir)
+}
+
+func (g *Game) walkImmediately(dir int) bool {
+	if dir < 0 || g.walkCooldown > 0 || g.isWalking {
+		return false
+	}
+	nextX, nextY := nextTileInDirection(g.client.Character.X, g.client.Character.Y, dir)
+	if !g.canStepTo(nextX, nextY) {
+		return false
+	}
+	g.facingDir = dir
+	g.startLocalWalk(dir)
+	g.walkCooldown = game.WalkDuration
+	return true
+}
+
+func (g *Game) faceOrAttack(dir int) bool {
+	if dir < 0 {
+		return false
+	}
+	if g.facingDir != dir {
+		return g.faceOnly(dir)
+	}
+	if g.attackCooldown > 0 {
+		return true
+	}
+	g.sendAttack()
+	g.attackCooldown = 18
+	return true
 }
 
 func (g *Game) startLocalWalk(dir int) {
@@ -287,6 +434,7 @@ func (g *Game) tickAnimations() {
 	// Tick character walk animations
 	for i := range g.client.NearbyChars {
 		ch := &g.client.NearbyChars[i]
+		ch.Combat.Tick()
 		if ch.TickWalk() {
 			if ch.PlayerID == g.client.PlayerID {
 				g.isWalking = false
@@ -294,9 +442,16 @@ func (g *Game) tickAnimations() {
 		}
 	}
 	// Tick NPC animations (idle + walk)
+	nextNpcs := g.client.NearbyNpcs[:0]
 	for i := range g.client.NearbyNpcs {
-		g.client.NearbyNpcs[i].Tick()
+		npc := g.client.NearbyNpcs[i]
+		npc.Tick()
+		if npc.DeathComplete() {
+			npc.Hidden = true
+		}
+		nextNpcs = append(nextNpcs, npc)
 	}
+	g.client.NearbyNpcs = nextNpcs
 }
 
 func (g *Game) loadCurrentMap() {
@@ -304,25 +459,6 @@ func (g *Game) loadCurrentMap() {
 	if err := g.mapRenderer.LoadMap(mapPath); err != nil {
 		slog.Error("failed to load map", "path", mapPath, "err", err)
 	}
-}
-
-func (g *Game) drawConnecting(screen *ebiten.Image) {
-	screen.Fill(color.NRGBA{R: 20, G: 20, B: 40, A: 255})
-	msg := "Connecting to server..."
-	if g.connectError != "" {
-		msg = fmt.Sprintf("Error: %s\nPress R to retry", g.connectError)
-	}
-	ebitenutil.DebugPrintAt(screen, msg, 20, 20)
-}
-
-func (g *Game) drawLogin(screen *ebiten.Image) {
-	screen.Fill(color.NRGBA{R: 20, G: 20, B: 40, A: 255})
-	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Logging in as '%s'...", g.client.Username), 20, 20)
-}
-
-func (g *Game) drawCharacterSelect(screen *ebiten.Image) {
-	screen.Fill(color.NRGBA{R: 20, G: 20, B: 40, A: 255})
-	ebitenutil.DebugPrintAt(screen, "Selecting character...", 20, 20)
 }
 
 func (g *Game) playerCamOffset() (float64, float64) {
@@ -334,7 +470,7 @@ func (g *Game) playerCamOffset() (float64, float64) {
 	return 0, 0
 }
 
-func (g *Game) drawInGame(screen *ebiten.Image) {
+func (g *Game) drawWorld(screen *ebiten.Image) {
 	screen.Fill(color.NRGBA{R: 0, G: 0, B: 0, A: 255})
 	g.mapRenderer.CamX = float64(g.client.Character.X)
 	g.mapRenderer.CamY = float64(g.client.Character.Y)
@@ -352,47 +488,17 @@ func (g *Game) drawInGame(screen *ebiten.Image) {
 	camSX += wox
 	camSY += woy
 	g.drawCursor(screen, camSX, camSY)
-
-	// HUD
-	mx, my := ebiten.CursorPosition()
-	isoX, isoY := render.ScreenToIso(
-		float64(mx)-float64(screenWidth)/2+camSX,
-		float64(my)-float64(screenHeight)/2+camSY+render.HalfTileH,
-	)
-	dir := [4]string{"Down", "Left", "Up", "Right"}[g.facingDir]
-	hud := fmt.Sprintf("%s  Map:%d  Pos:(%d,%d)  Tile:(%d,%d)  Dir:%s  FPS:%.0f",
-		g.client.Character.Name, g.client.Character.MapID,
-		g.client.Character.X, g.client.Character.Y,
-		int(isoX), int(isoY), dir, ebiten.ActualFPS(),
-	)
-	ebitenutil.DebugPrintAt(screen, hud, 4, 4)
-
-	g.drawChat(screen)
 }
 
 func (g *Game) drawCursor(screen *ebiten.Image, camSX, camSY float64) {
-	mx, my := ebiten.CursorPosition()
-	halfW := float64(screenWidth) / 2
-	halfH := float64(screenHeight) / 2
-
-	worldX := float64(mx) - halfW + camSX
-	worldY := float64(my) - halfH + camSY + render.HalfTileH
-	ix, iy := render.ScreenToIso(worldX, worldY)
-
-	// Don't show cursor outside map bounds
-	if g.mapRenderer.Map != nil {
-		if ix < 0 || iy < 0 || ix > g.mapRenderer.Map.Width || iy > g.mapRenderer.Map.Height {
-			return
-		}
-	}
-
-	// Determine cursor type: 0=walk, 1=interact (NPC/player/chair), 2=item
-	cursorType := g.getCursorType(ix, iy)
-	if cursorType < 0 {
+	hover := g.currentWorldHoverIntent()
+	if !hover.Valid || hover.CursorType < 0 {
 		return // wall/edge — no cursor
 	}
 
-	sx, sy := render.IsoToScreen(float64(ix), float64(iy))
+	halfW := float64(screenWidth) / 2
+	halfH := float64(screenHeight) / 2
+	sx, sy := render.IsoToScreen(float64(hover.TileX), float64(hover.TileY))
 	sx = sx - camSX + halfW
 	sy = sy - camSY + halfH
 
@@ -404,7 +510,7 @@ func (g *Game) drawCursor(screen *ebiten.Image, camSX, camSY float64) {
 	// Cursor sprite sheet: 3 states at 64px intervals, each 64x32
 	tw := render.TileWidth
 	th := render.TileHeight
-	srcX := cursorType * tw
+	srcX := hover.CursorType * tw
 	if srcX+tw > cursorImg.Bounds().Dx() {
 		srcX = 0
 	}
@@ -413,6 +519,105 @@ func (g *Game) drawCursor(screen *ebiten.Image, camSX, camSY float64) {
 	op := &ebiten.DrawImageOptions{}
 	op.GeoM.Translate(sx-float64(tw)/2, sy-float64(th)/2)
 	screen.DrawImage(sub, op)
+}
+
+func (g *Game) currentWorldHoverIntent() worldHoverIntent {
+	tileX, tileY := g.hoveredTile(g.client.UISnapshot())
+	if !g.isMapTileInBounds(tileX, tileY) {
+		return worldHoverIntent{TileX: tileX, TileY: tileY, CursorType: -1, Valid: false}
+	}
+	return worldHoverIntent{
+		TileX:      tileX,
+		TileY:      tileY,
+		CursorType: g.getCursorType(tileX, tileY),
+		Valid:      true,
+	}
+}
+
+func (g *Game) isMapTileInBounds(tileX, tileY int) bool {
+	if g.mapRenderer.Map == nil {
+		return false
+	}
+	if tileX < 0 || tileY < 0 {
+		return false
+	}
+	return tileX <= g.mapRenderer.Map.Width && tileY <= g.mapRenderer.Map.Height
+}
+
+func (g *Game) canStepTo(tileX, tileY int) bool {
+	if !g.isMapTileInBounds(tileX, tileY) {
+		return false
+	}
+	switch g.getCursorType(tileX, tileY) {
+	case 0, 2:
+		return true
+	default:
+		return false
+	}
+}
+
+func (g *Game) isAttackTargetTile(tileX, tileY int) bool {
+	for _, ch := range g.client.NearbyChars {
+		if ch.PlayerID == g.client.PlayerID {
+			continue
+		}
+		if ch.X == tileX && ch.Y == tileY {
+			return true
+		}
+	}
+	for _, npc := range g.client.NearbyNpcs {
+		if npc.Dead || npc.Hidden {
+			continue
+		}
+		if npc.X == tileX && npc.Y == tileY {
+			return true
+		}
+	}
+	return false
+}
+
+func nextTileInDirection(tileX, tileY, dir int) (int, int) {
+	switch dir {
+	case 0:
+		return tileX, tileY + 1
+	case 1:
+		return tileX - 1, tileY
+	case 2:
+		return tileX, tileY - 1
+	case 3:
+		return tileX + 1, tileY
+	default:
+		return tileX, tileY
+	}
+}
+
+func directionTowardTile(fromX, fromY, toX, toY int) (int, bool) {
+	dx := toX - fromX
+	dy := toY - fromY
+	if dx == 0 && dy == 0 {
+		return -1, false
+	}
+	if absInt(dx) >= absInt(dy) {
+		if dx < 0 {
+			return 1, true
+		}
+		return 3, true
+	}
+	if dy < 0 {
+		return 2, true
+	}
+	return 0, true
+}
+
+func isAdjacentTile(ax, ay, bx, by int) bool {
+	return absInt(ax-bx)+absInt(ay-by) == 1
+}
+
+func absInt(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func (g *Game) getCursorType(tileX, tileY int) int {
@@ -446,6 +651,9 @@ func (g *Game) getCursorType(tileX, tileY int) int {
 		}
 	}
 	for _, npc := range g.client.NearbyNpcs {
+		if npc.Dead || npc.Hidden {
+			continue
+		}
 		if npc.X == tileX && npc.Y == tileY {
 			return 1
 		}

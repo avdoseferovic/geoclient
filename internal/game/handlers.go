@@ -99,22 +99,26 @@ func handleInitOk(c *Client, d *server.InitInitReplyCodeDataOk) error {
 	c.PlayerID = d.PlayerId
 
 	// Set encryption multiples
-	c.Bus.SetEncryption(d.ClientEncryptionMultiple, d.ServerEncryptionMultiple)
+	bus := c.GetBus()
+	if bus == nil {
+		return fmt.Errorf("connection bus missing during init")
+	}
+	bus.SetEncryption(d.ClientEncryptionMultiple, d.ServerEncryptionMultiple)
 
 	// Set sequence from init values: value = seq1*7 + seq2 - 13
 	seqStart := d.Seq1*7 + d.Seq2 - 13
-	c.Bus.Sequencer.Reset(seqStart)
-	c.Bus.Sequencer.NextSequence() // consume slot 0
+	bus.Sequencer.Reset(seqStart)
+	bus.Sequencer.NextSequence() // consume slot 0
 
 	slog.Info("init complete", "playerID", c.PlayerID, "seqStart", seqStart)
 
 	// Send connection accept
-	if err := c.Bus.SendSequenced(&client.ConnectionAcceptClientPacket{
+	if err := bus.SendSequenced(&client.ConnectionAcceptClientPacket{
 		PlayerId:                 c.PlayerID,
 		ClientEncryptionMultiple: d.ClientEncryptionMultiple,
 		ServerEncryptionMultiple: d.ServerEncryptionMultiple,
 	}); err != nil {
-		return fmt.Errorf("send connection accept: %w", err)
+		return fmt.Errorf("connection setup failed while sending accept: %w", err)
 	}
 
 	c.SetState(StateConnected)
@@ -128,10 +132,17 @@ func handleConnectionPlayer(c *Client, reader *data.EoReader) error {
 	}
 
 	// Update sequence start: value = seq1 - seq2
-	c.Bus.Sequencer.SetStart(pkt.Seq1 - pkt.Seq2)
+	bus := c.GetBus()
+	if bus == nil {
+		return fmt.Errorf("connection bus missing during ping")
+	}
+	bus.Sequencer.SetStart(pkt.Seq1 - pkt.Seq2)
 
 	// Reply with pong
-	return c.Bus.SendSequenced(&client.ConnectionPingClientPacket{})
+	if err := bus.SendSequenced(&client.ConnectionPingClientPacket{}); err != nil {
+		return fmt.Errorf("connection keepalive failed while sending ping reply: %w", err)
+	}
+	return nil
 }
 
 func handleLoginReply(c *Client, reader *data.EoReader) error {
@@ -189,13 +200,21 @@ func handleWelcomeReply(c *Client, reader *data.EoReader) error {
 		c.SessionID = d.SessionId
 		c.Character.ID = d.CharacterId
 		c.Character.MapID = int(d.MapId)
+		syncWelcomeCharacterState(c, d)
 		slog.Info("character selected", "sessionID", d.SessionId, "mapID", d.MapId)
 
 		// Send welcome message to enter game
-		return c.Bus.SendSequenced(&client.WelcomeMsgClientPacket{
+		bus := c.GetBus()
+		if bus == nil {
+			return fmt.Errorf("connection bus missing during welcome")
+		}
+		if err := bus.SendSequenced(&client.WelcomeMsgClientPacket{
 			SessionId:   d.SessionId,
 			CharacterId: d.CharacterId,
-		})
+		}); err != nil {
+			return fmt.Errorf("enter game failed while sending welcome message: %w", err)
+		}
+		return nil
 
 	case server.WelcomeCode_EnterGame:
 		d := pkt.WelcomeCodeData.(*server.WelcomeReplyWelcomeCodeDataEnterGame)
@@ -203,6 +222,7 @@ func handleWelcomeReply(c *Client, reader *data.EoReader) error {
 		// Populate nearby characters
 		c.NearbyChars = nil
 		for _, ch := range d.Nearby.Characters {
+			syncLocalVitalsFromCharacter(c, ch)
 			nc := NearbyCharacter{
 				PlayerID:  ch.PlayerId,
 				Name:      ch.Name,
@@ -222,13 +242,10 @@ func handleWelcomeReply(c *Client, reader *data.EoReader) error {
 				Level:     ch.Level,
 			}
 			c.NearbyChars = append(c.NearbyChars, nc)
-
 			if ch.PlayerId == c.PlayerID {
-				c.Character.X = ch.Coords.X
-				c.Character.Y = ch.Coords.Y
-				c.Character.Direction = ch.Direction
-				c.Character.Name = ch.Name
+				syncVisibleEquipment(c, nearbyCharacterView(nc))
 			}
+
 		}
 
 		// Populate nearby NPCs
@@ -256,6 +273,9 @@ func handleWelcomeReply(c *Client, reader *data.EoReader) error {
 			})
 		}
 
+		syncWeight(c, d.Weight)
+		setInventoryFromNetItems(c, d.Items)
+
 		c.SetState(StateInGame)
 		slog.Info("entered game",
 			"map", c.Character.MapID,
@@ -266,6 +286,12 @@ func handleWelcomeReply(c *Client, reader *data.EoReader) error {
 			"npcs", len(c.NearbyNpcs),
 			"items", len(c.NearbyItems),
 		)
+
+		if bus := c.GetBus(); bus != nil {
+			if err := bus.SendSequenced(&client.PaperdollRequestClientPacket{PlayerId: c.PlayerID}); err != nil {
+				slog.Warn("paperdoll request failed", "err", err)
+			}
+		}
 		c.Emit(Event{Type: EventEnterGame, Data: d})
 	}
 	return nil

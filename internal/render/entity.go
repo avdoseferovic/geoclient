@@ -2,9 +2,12 @@ package render
 
 import (
 	"image"
+	"image/color"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+	"github.com/hajimehoshi/ebiten/v2/text"
+	"golang.org/x/image/font/basicfont"
 
 	"github.com/avdo/eoweb/internal/gfx"
 )
@@ -39,6 +42,10 @@ type CharacterEntity struct {
 	WalkFrame int     // 0-3 current walk animation frame
 	WalkProg  float64 // 0.0 to 1.0 interpolation within current frame
 	Mirrored  bool    // true for Right(3) and Up(2) directions
+
+	AttackProg float64
+	HitProg    float64
+	Indicators []CombatIndicator
 }
 
 // NpcEntity represents an NPC to render on the map.
@@ -51,6 +58,22 @@ type NpcEntity struct {
 	IdleFrame    int // 0 or 1 for idle animation
 	Walking      bool
 	WalkProg     float64 // 0.0 to 1.0
+	AttackProg   float64
+	HitProg      float64
+	Dead         bool
+	DeathProg    float64
+	Indicators   []CombatIndicator
+}
+
+type CombatIndicator struct {
+	Text     string
+	Kind     int
+	Progress float64
+}
+
+type attachmentOffset struct {
+	X float64
+	Y float64
 }
 
 // ItemEntity represents a dropped item on the map.
@@ -105,6 +128,12 @@ func RenderCharacter(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEnti
 		sy += woy
 	}
 
+	if ch.AttackProg > 0 {
+		aox, aoy := attackOffset(ch.Direction, ch.AttackProg)
+		sx += aox
+		sy += aoy
+	}
+
 	frame := ch.Frame
 	gfxID := skinGfxID(frame)
 
@@ -144,23 +173,15 @@ func RenderCharacter(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEnti
 	drawX := sx - float64(w)/2
 	drawY := sy - float64(h) + HalfHalfTileH
 
-	op := &ebiten.DrawImageOptions{}
-	if ch.Mirrored {
-		op.GeoM.Scale(-1, 1)
-		op.GeoM.Translate(drawX+float64(w), drawY)
-	} else {
-		op.GeoM.Translate(drawX, drawY)
-	}
-	screen.DrawImage(sub, op)
-
-	// Draw hair
-	renderHair(screen, loader, ch, frame, sx, sy, w, h)
-
-	// Draw armor
-	renderArmor(screen, loader, ch, frame, sx, sy)
-
-	// Draw boots
-	renderBoots(screen, loader, ch, frame, sx, sy)
+	renderCharacterWeaponBehind(screen, loader, ch, frame, drawX, drawY, w, h)
+	renderImage(screen, sub, drawX, drawY, ch.Mirrored, 1.0, ch.HitProg)
+	renderBoots(screen, loader, ch, frame, drawX, drawY, w, h)
+	renderArmor(screen, loader, ch, frame, drawX, drawY, w, h)
+	renderHair(screen, loader, ch, frame, drawX, drawY, w, h)
+	renderHat(screen, loader, ch, frame, drawX, drawY, w, h)
+	renderShield(screen, loader, ch, frame, drawX, drawY, w, h)
+	renderCharacterWeaponFront(screen, loader, ch, frame, drawX, drawY, w, h)
+	renderIndicators(screen, ch.Indicators, sx, drawY-30)
 
 	// Draw nameplate above character
 	nameX := sx - float64(len(ch.Name)*3)
@@ -168,7 +189,29 @@ func RenderCharacter(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEnti
 	ebitenutil.DebugPrintAt(screen, ch.Name, int(nameX), int(nameY))
 }
 
-func renderHair(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, frame CharacterFrame, sx, sy float64, charW, charH int) {
+func renderImage(screen, img *ebiten.Image, x, y float64, mirrored bool, alpha float32, hitProg float64) {
+	if img == nil {
+		return
+	}
+
+	op := &ebiten.DrawImageOptions{}
+	if mirrored {
+		op.GeoM.Scale(-1, 1)
+		op.GeoM.Translate(x+float64(img.Bounds().Dx()), y)
+	} else {
+		op.GeoM.Translate(x, y)
+	}
+	if alpha < 1 {
+		op.ColorScale.ScaleAlpha(alpha)
+	}
+	if hitProg > 0 {
+		flash := float32(0.2 + 0.3*(1.0-hitProg))
+		op.ColorScale.Scale(1.0+flash, 0.75, 0.75, 1)
+	}
+	screen.DrawImage(img, op)
+}
+
+func renderHair(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, frame CharacterFrame, bodyX, bodyY float64, charW, charH int) {
 	if ch.HairStyle == 0 {
 		return
 	}
@@ -188,15 +231,11 @@ func renderHair(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, f
 		return
 	}
 
-	hw := float64(img.Bounds().Dx())
-	hh := float64(img.Bounds().Dy())
-
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Translate(sx-hw/2, sy-float64(charH)+HalfTileH-hh/2+float64(charH)/2-14)
-	screen.DrawImage(img, op)
+	offset := hairOffset(ch.Gender, frame)
+	renderAttachment(screen, img, bodyX, bodyY, charW, charH, offset, ch.Mirrored, true, 1.0, ch.HitProg)
 }
 
-func renderArmor(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, frame CharacterFrame, sx, sy float64) {
+func renderArmor(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, frame CharacterFrame, bodyX, bodyY float64, charW, charH int) {
 	if ch.Armor == 0 {
 		return
 	}
@@ -212,16 +251,11 @@ func renderArmor(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, 
 		return
 	}
 
-	w := float64(img.Bounds().Dx())
-	h := float64(img.Bounds().Dy())
-
-	_, charH := frameSize(frame)
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Translate(sx-w/2, sy-float64(charH)+HalfTileH+(float64(charH)-h)/2-3)
-	screen.DrawImage(img, op)
+	offset := armorOffset(ch.Gender, frame)
+	renderAttachment(screen, img, bodyX, bodyY, charW, charH, offset, ch.Mirrored, true, 1.0, ch.HitProg)
 }
 
-func renderBoots(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, frame CharacterFrame, sx, sy float64) {
+func renderBoots(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, frame CharacterFrame, bodyX, bodyY float64, charW, charH int) {
 	if ch.Boots == 0 {
 		return
 	}
@@ -240,17 +274,128 @@ func renderBoots(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, 
 		return
 	}
 
-	w := float64(img.Bounds().Dx())
-	h := float64(img.Bounds().Dy())
+	offset := bootsOffset(ch.Gender, frame)
+	renderAttachment(screen, img, bodyX, bodyY, charW, charH, offset, ch.Mirrored, true, 1.0, ch.HitProg)
+}
 
-	_, charH := frameSize(frame)
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Translate(sx-w/2, sy-float64(charH)+HalfTileH+(float64(charH)-h)/2+21)
-	screen.DrawImage(img, op)
+func renderHat(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, frame CharacterFrame, bodyX, bodyY float64, charW, charH int) {
+	if ch.Hat == 0 {
+		return
+	}
+
+	baseID := (ch.Hat - 1) * 10
+	hatID := baseID + 1
+	if isUpLeft(frame) {
+		hatID = baseID + 3
+	}
+
+	img, err := loader.GetImage(GenderGfx(ch.Gender, GfxFemaleHat, GfxMaleHat), hatID)
+	if err != nil || img == nil {
+		return
+	}
+
+	offset := hatOffset(ch.Gender, frame)
+	renderAttachment(screen, img, bodyX, bodyY, charW, charH, offset, ch.Mirrored, true, 1.0, ch.HitProg)
+}
+
+func renderShield(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, frame CharacterFrame, bodyX, bodyY float64, charW, charH int) {
+	if ch.Shield == 0 {
+		return
+	}
+
+	baseID := (ch.Shield - 1) * 50
+	shieldID := baseID + int(frame) + 1
+	img, err := loader.GetImage(GenderGfx(ch.Gender, GfxFemaleBack, GfxMaleBack), shieldID)
+	if err != nil || img == nil {
+		return
+	}
+
+	offset := shieldOffset(ch.Gender, frame)
+	renderAttachment(screen, img, bodyX, bodyY, charW, charH, offset, ch.Mirrored, true, 1.0, ch.HitProg)
+}
+
+func renderCharacterWeaponBehind(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, frame CharacterFrame, bodyX, bodyY float64, charW, charH int) {
+	if ch.Weapon == 0 {
+		return
+	}
+
+	weaponID, ok := weaponGraphicID(ch.Weapon, frame)
+	if !ok {
+		return
+	}
+
+	img, err := loader.GetImage(GenderGfx(ch.Gender, GfxFemaleWeapons, GfxMaleWeapons), weaponID)
+	if err != nil || img == nil {
+		return
+	}
+
+	offset := weaponOffset(ch.Direction, ch.Gender, frame)
+	renderAttachment(screen, img, bodyX, bodyY, charW, charH, offset, ch.Mirrored, false, 1.0, ch.HitProg)
+}
+
+func renderCharacterWeaponFront(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, frame CharacterFrame, bodyX, bodyY float64, charW, charH int) {
+	if ch.Weapon == 0 || frame != FrameMeleeDown2 {
+		return
+	}
+
+	img, err := loader.GetImage(GenderGfx(ch.Gender, GfxFemaleWeapons, GfxMaleWeapons), (ch.Weapon-1)*100+17)
+	if err != nil || img == nil {
+		return
+	}
+
+	offset := weaponOffset(ch.Direction, ch.Gender, frame)
+	renderAttachment(screen, img, bodyX, bodyY, charW, charH, offset, ch.Mirrored, false, 1.0, ch.HitProg)
+}
+
+func renderAttachment(screen *ebiten.Image, img *ebiten.Image, bodyX, bodyY float64, bodyW, bodyH int, offset attachmentOffset, mirrored, mirrorOffset bool, alpha float32, hitProg float64) {
+	if img == nil {
+		return
+	}
+
+	imgW := img.Bounds().Dx()
+	imgH := img.Bounds().Dy()
+	x := bodyX + float64(bodyW-imgW)/2 + offset.X
+	y := bodyY + float64(bodyH-imgH)/2 + offset.Y
+	if mirrored && mirrorOffset {
+		attachmentRight := (x - bodyX) + float64(imgW)
+		x = bodyX + float64(bodyW) - attachmentRight
+	}
+	renderImage(screen, img, x, y, mirrored, alpha, hitProg)
+}
+
+func weaponGraphicID(weapon int, frame CharacterFrame) (int, bool) {
+	frameMap := map[CharacterFrame]int{
+		FrameStandDown:  0,
+		FrameStandUp:    1,
+		FrameWalkDown1:  2,
+		FrameWalkDown2:  3,
+		FrameWalkDown3:  4,
+		FrameWalkDown4:  5,
+		FrameWalkUp1:    6,
+		FrameWalkUp2:    7,
+		FrameWalkUp3:    8,
+		FrameWalkUp4:    9,
+		FrameRaisedDown: 10,
+		FrameRaisedUp:   11,
+		FrameMeleeDown1: 12,
+		FrameMeleeDown2: 13,
+		FrameMeleeUp1:   14,
+		FrameMeleeUp2:   15,
+	}
+
+	index, ok := frameMap[frame]
+	if !ok {
+		return 0, false
+	}
+	return (weapon-1)*100 + index + 1, true
 }
 
 // RenderNPC draws an NPC at the given screen position.
 func RenderNPC(screen *ebiten.Image, loader *gfx.Loader, npc *NpcEntity, sx, sy float64) {
+	if npc.GraphicID <= 0 {
+		return
+	}
+
 	if npc.Walking && npc.DestX != npc.X || npc.Walking && npc.DestY != npc.Y {
 		// Interpolate from origin toward destination using actual tile delta
 		destSX, destSY := IsoToScreen(float64(npc.DestX), float64(npc.DestY))
@@ -259,6 +404,11 @@ func RenderNPC(screen *ebiten.Image, loader *gfx.Loader, npc *NpcEntity, sx, sy 
 		dy := (destSY - origSY) * npc.WalkProg
 		sx += dx
 		sy += dy
+	}
+	if npc.AttackProg > 0 {
+		aox, aoy := attackOffset(npc.Direction, npc.AttackProg)
+		sx += aox
+		sy += aoy
 	}
 
 	baseID := (npc.GraphicID - 1) * 40
@@ -285,15 +435,17 @@ func RenderNPC(screen *ebiten.Image, loader *gfx.Loader, npc *NpcEntity, sx, sy 
 
 	w := float64(img.Bounds().Dx())
 	h := float64(img.Bounds().Dy())
-
-	op := &ebiten.DrawImageOptions{}
-	if mirrored {
-		op.GeoM.Scale(-1, 1)
-		op.GeoM.Translate(sx+w/2, sy-h+HalfTileH)
-	} else {
-		op.GeoM.Translate(sx-w/2, sy-h+HalfTileH)
+	alpha := float32(1.0)
+	if npc.Dead {
+		alpha = float32(1.0 - npc.DeathProg*0.85)
+		if alpha < 0 {
+			alpha = 0
+		}
+		sy -= npc.DeathProg * 8
 	}
-	screen.DrawImage(img, op)
+
+	renderImage(screen, img, sx-w/2, sy-h+HalfTileH, mirrored, alpha, npc.HitProg)
+	renderIndicators(screen, npc.Indicators, sx, sy-h-10)
 }
 
 // RenderItem draws a dropped item at the given screen position.
@@ -309,4 +461,306 @@ func RenderItem(screen *ebiten.Image, loader *gfx.Loader, item *ItemEntity, sx, 
 	op := &ebiten.DrawImageOptions{}
 	op.GeoM.Translate(sx-w/2, sy-h/2)
 	screen.DrawImage(img, op)
+}
+
+func renderIndicators(screen *ebiten.Image, indicators []CombatIndicator, sx, baseY float64) {
+	if len(indicators) == 0 {
+		return
+	}
+
+	face := basicfont.Face7x13
+	for i := range indicators {
+		indicator := indicators[len(indicators)-1-i]
+		rise := indicator.Progress * 18
+		y := baseY - float64(i*14) - rise
+		x := sx - float64(len(indicator.Text)*7)/2
+		text.Draw(screen, indicator.Text, face, int(x), int(y), indicatorColor(indicator.Kind, indicator.Progress))
+	}
+}
+
+func indicatorColor(kind int, progress float64) color.Color {
+	alpha := uint8(255)
+	if progress > 0.65 {
+		alpha = uint8(255 * (1.0 - (progress-0.65)/0.35))
+	}
+	if alpha < 48 {
+		alpha = 48
+	}
+
+	switch kind {
+	case 1:
+		return color.NRGBA{R: 220, G: 220, B: 220, A: alpha}
+	case 2:
+		return color.NRGBA{R: 110, G: 255, B: 140, A: alpha}
+	default:
+		return color.NRGBA{R: 255, G: 110, B: 110, A: alpha}
+	}
+}
+
+func attackOffset(dir int, progress float64) (float64, float64) {
+	distance := 3.0 * (1.0 - progress)
+	switch dir {
+	case 0:
+		return -distance, distance / 2
+	case 1:
+		return -distance, -distance / 2
+	case 2:
+		return distance, -distance / 2
+	case 3:
+		return distance, distance / 2
+	default:
+		return 0, 0
+	}
+}
+
+func hairOffset(gender int, frame CharacterFrame) attachmentOffset {
+	if gender == 0 {
+		switch frame {
+		case FrameMeleeDown1, FrameMeleeUp1:
+			return attachmentOffset{0, -14}
+		case FrameMeleeDown2:
+			return attachmentOffset{-4, -9}
+		case FrameMeleeUp2:
+			return attachmentOffset{-4, -13}
+		case FrameRaisedDown, FrameRaisedUp:
+			return attachmentOffset{-1, -12}
+		default:
+			return attachmentOffset{-1, -14}
+		}
+	}
+
+	switch frame {
+	case FrameWalkDown1, FrameWalkDown2, FrameWalkDown3, FrameWalkDown4:
+		return attachmentOffset{0, -15}
+	case FrameMeleeDown1, FrameMeleeUp1:
+		return attachmentOffset{1, -15}
+	case FrameMeleeDown2:
+		return attachmentOffset{-5, -11}
+	case FrameMeleeUp2:
+		return attachmentOffset{-3, -14}
+	case FrameRaisedDown, FrameRaisedUp:
+		return attachmentOffset{-1, -13}
+	default:
+		return attachmentOffset{-1, -15}
+	}
+}
+
+func bootsOffset(gender int, frame CharacterFrame) attachmentOffset {
+	if gender == 0 {
+		switch frame {
+		case FrameWalkUp4:
+			return attachmentOffset{0, 20}
+		case FrameMeleeDown1, FrameMeleeUp1:
+			return attachmentOffset{1, 21}
+		case FrameMeleeDown2, FrameMeleeUp2:
+			return attachmentOffset{-1, 21}
+		case FrameRaisedDown, FrameRaisedUp:
+			return attachmentOffset{0, 23}
+		default:
+			return attachmentOffset{0, 21}
+		}
+	}
+
+	switch frame {
+	case FrameWalkDown1, FrameWalkDown2, FrameWalkDown3, FrameWalkDown4:
+		return attachmentOffset{1, 19}
+	case FrameWalkUp1, FrameWalkUp2, FrameWalkUp3, FrameWalkUp4:
+		return attachmentOffset{0, 19}
+	case FrameMeleeDown1, FrameMeleeUp1:
+		return attachmentOffset{2, 20}
+	case FrameMeleeDown2, FrameMeleeUp2:
+		return attachmentOffset{-2, 20}
+	case FrameRaisedDown, FrameRaisedUp:
+		return attachmentOffset{0, 22}
+	default:
+		return attachmentOffset{0, 20}
+	}
+}
+
+func armorOffset(gender int, frame CharacterFrame) attachmentOffset {
+	if gender == 0 {
+		switch frame {
+		case FrameWalkDown1, FrameWalkDown2, FrameWalkDown3, FrameWalkDown4,
+			FrameWalkUp1, FrameWalkUp2, FrameWalkUp3, FrameWalkUp4:
+			return attachmentOffset{0, -4}
+		case FrameMeleeDown1, FrameMeleeUp1:
+			return attachmentOffset{1, -3}
+		case FrameMeleeDown2, FrameMeleeUp2:
+			return attachmentOffset{-1, -3}
+		case FrameRaisedDown, FrameRaisedUp:
+			return attachmentOffset{0, -1}
+		default:
+			return attachmentOffset{0, -3}
+		}
+	}
+
+	switch frame {
+	case FrameWalkDown1, FrameWalkDown2, FrameWalkDown3, FrameWalkDown4:
+		return attachmentOffset{1, -5}
+	case FrameWalkUp1, FrameWalkUp2, FrameWalkUp3, FrameWalkUp4:
+		return attachmentOffset{0, -5}
+	case FrameMeleeDown1, FrameMeleeUp1:
+		return attachmentOffset{2, -4}
+	case FrameMeleeDown2, FrameMeleeUp2:
+		return attachmentOffset{-2, -4}
+	case FrameRaisedDown, FrameRaisedUp:
+		return attachmentOffset{0, -2}
+	default:
+		return attachmentOffset{0, -4}
+	}
+}
+
+func hatOffset(gender int, frame CharacterFrame) attachmentOffset {
+	if gender == 0 {
+		switch frame {
+		case FrameMeleeDown1, FrameMeleeUp1:
+			return attachmentOffset{1, -6}
+		case FrameMeleeDown2:
+			return attachmentOffset{-3, -1}
+		case FrameMeleeUp2:
+			return attachmentOffset{-3, -5}
+		case FrameRaisedDown, FrameRaisedUp:
+			return attachmentOffset{0, -4}
+		default:
+			return attachmentOffset{0, -6}
+		}
+	}
+
+	switch frame {
+	case FrameWalkDown1, FrameWalkDown2, FrameWalkDown3, FrameWalkDown4:
+		return attachmentOffset{1, -7}
+	case FrameMeleeDown1, FrameMeleeUp1:
+		return attachmentOffset{2, -7}
+	case FrameMeleeDown2:
+		return attachmentOffset{-4, -3}
+	case FrameMeleeUp2:
+		return attachmentOffset{-2, -6}
+	case FrameRaisedDown, FrameRaisedUp:
+		return attachmentOffset{0, -5}
+	default:
+		return attachmentOffset{0, -7}
+	}
+}
+
+func weaponOffset(direction, gender int, frame CharacterFrame) attachmentOffset {
+	base := baseWeaponOffset(gender, frame)
+	if direction == 2 || direction == 3 {
+		base.X = -base.X
+		base.X += weaponMirrorNudge(direction, gender, frame)
+	}
+	return base
+}
+
+func baseWeaponOffset(gender int, frame CharacterFrame) attachmentOffset {
+	if gender == 0 {
+		switch frame {
+		case FrameWalkDown1, FrameWalkDown2, FrameWalkDown3, FrameWalkDown4,
+			FrameWalkUp1, FrameWalkUp2, FrameWalkUp3, FrameWalkUp4:
+			return attachmentOffset{-9, -7}
+		case FrameMeleeDown1, FrameMeleeUp1:
+			return attachmentOffset{-8, -6}
+		case FrameMeleeDown2, FrameMeleeUp2:
+			return attachmentOffset{-10, -6}
+		case FrameRaisedDown, FrameRaisedUp:
+			return attachmentOffset{-9, -4}
+		default:
+			return attachmentOffset{-9, -6}
+		}
+	}
+
+	switch frame {
+	case FrameWalkDown1, FrameWalkDown2, FrameWalkDown3, FrameWalkDown4:
+		return attachmentOffset{-8, -8}
+	case FrameWalkUp1, FrameWalkUp2, FrameWalkUp3, FrameWalkUp4:
+		return attachmentOffset{-9, -8}
+	case FrameMeleeDown1, FrameMeleeUp1:
+		return attachmentOffset{-7, -7}
+	case FrameMeleeDown2, FrameMeleeUp2:
+		return attachmentOffset{-11, -7}
+	case FrameRaisedDown, FrameRaisedUp:
+		return attachmentOffset{-9, -5}
+	default:
+		return attachmentOffset{-9, -7}
+	}
+}
+
+func weaponMirrorNudge(direction, gender int, frame CharacterFrame) float64 {
+	if direction == 3 {
+		if gender == 0 {
+			switch frame {
+			case FrameMeleeDown2:
+				return -2
+			case FrameMeleeDown1, FrameRaisedDown:
+				return -1
+			default:
+				return -1
+			}
+		}
+
+		switch frame {
+		case FrameMeleeDown2:
+			return -2
+		case FrameMeleeDown1, FrameRaisedDown:
+			return -1
+		default:
+			return -1
+		}
+	}
+
+	if direction == 2 {
+		if gender == 0 {
+			switch frame {
+			case FrameMeleeUp2:
+				return -2
+			case FrameMeleeUp1, FrameRaisedUp:
+				return -1
+			default:
+				return -1
+			}
+		}
+
+		switch frame {
+		case FrameMeleeUp2:
+			return -2
+		case FrameMeleeUp1, FrameRaisedUp:
+			return -1
+		default:
+			return -1
+		}
+	}
+
+	return 0
+}
+
+func shieldOffset(gender int, frame CharacterFrame) attachmentOffset {
+	if gender == 0 {
+		switch frame {
+		case FrameWalkDown1, FrameWalkDown2, FrameWalkDown3, FrameWalkDown4,
+			FrameWalkUp1, FrameWalkUp2, FrameWalkUp3, FrameWalkUp4:
+			return attachmentOffset{-5, 4}
+		case FrameMeleeDown1, FrameMeleeUp1:
+			return attachmentOffset{-4, 5}
+		case FrameMeleeDown2, FrameMeleeUp2:
+			return attachmentOffset{-6, 5}
+		case FrameRaisedDown, FrameRaisedUp:
+			return attachmentOffset{-5, 7}
+		default:
+			return attachmentOffset{-5, 5}
+		}
+	}
+
+	switch frame {
+	case FrameWalkDown1, FrameWalkDown2, FrameWalkDown3, FrameWalkDown4:
+		return attachmentOffset{-4, 3}
+	case FrameWalkUp1, FrameWalkUp2, FrameWalkUp3, FrameWalkUp4:
+		return attachmentOffset{-5, 3}
+	case FrameMeleeDown1, FrameMeleeUp1:
+		return attachmentOffset{-3, 4}
+	case FrameMeleeDown2, FrameMeleeUp2:
+		return attachmentOffset{-7, 4}
+	case FrameRaisedDown, FrameRaisedUp:
+		return attachmentOffset{-5, 6}
+	default:
+		return attachmentOffset{-5, 4}
+	}
 }

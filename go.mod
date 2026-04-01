@@ -6,6 +6,7 @@ require (
 	github.com/ethanmoffat/eolib-go/v3 v3.0.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/hajimehoshi/ebiten/v2 v2.9.9
+	golang.org/x/image v0.31.0
 )
 
 require (

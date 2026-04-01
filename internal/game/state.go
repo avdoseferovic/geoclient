@@ -40,14 +40,152 @@ func (s GameState) String() string {
 
 // Character holds local player info after entering the game.
 type Character struct {
-	ID        int
-	Name      string
-	MapID     int
-	X, Y      int
-	Direction protocol.Direction
-	Level     int
-	HP, MaxHP int
-	TP, MaxTP int
+	ID          int
+	Name        string
+	Title       string
+	GuildName   string
+	GuildRank   string
+	GuildTag    string
+	Home        string
+	Partner     string
+	MapID       int
+	X, Y        int
+	Direction   protocol.Direction
+	Gender      protocol.Gender
+	Admin       protocol.AdminLevel
+	ClassID     int
+	Level       int
+	Experience  int
+	Usage       int
+	StatPoints  int
+	SkillPoints int
+	Karma       int
+	HP, MaxHP   int
+	TP, MaxTP   int
+	MaxSP       int
+	Weight      eonet.Weight
+	BaseStats   CharacterBaseStats
+	CombatStats CharacterCombatStats
+}
+
+type CharacterBaseStats struct {
+	Str int
+	Int int
+	Wis int
+	Agi int
+	Con int
+	Cha int
+}
+
+type CharacterCombatStats struct {
+	MinDamage int
+	MaxDamage int
+	Accuracy  int
+	Evade     int
+	Armor     int
+}
+
+type InventoryItem struct {
+	ID     int
+	Amount int
+}
+
+type CombatIndicatorKind int
+
+const (
+	CombatIndicatorDamage CombatIndicatorKind = iota
+	CombatIndicatorMiss
+	CombatIndicatorHeal
+)
+
+const (
+	CombatIndicatorDuration = 45
+	AttackAnimationDuration = 12
+	HitAnimationDuration    = 10
+	NpcDeathAnimationTicks  = 24
+)
+
+type CombatIndicator struct {
+	Text     string
+	Kind     CombatIndicatorKind
+	Ticks    int
+	MaxTicks int
+}
+
+func (i CombatIndicator) Progress() float64 {
+	if i.MaxTicks <= 0 {
+		return 1
+	}
+
+	progress := 1.0 - float64(i.Ticks)/float64(i.MaxTicks)
+	if progress < 0 {
+		return 0
+	}
+	if progress > 1 {
+		return 1
+	}
+	return progress
+}
+
+type CombatState struct {
+	Indicators []CombatIndicator
+	AttackTick int
+	HitTick    int
+}
+
+func (s *CombatState) Reset() {
+	s.Indicators = nil
+	s.AttackTick = 0
+	s.HitTick = 0
+}
+
+func (s *CombatState) Tick() {
+	if s.AttackTick > 0 {
+		s.AttackTick--
+	}
+	if s.HitTick > 0 {
+		s.HitTick--
+	}
+
+	if len(s.Indicators) == 0 {
+		return
+	}
+
+	next := s.Indicators[:0]
+	for _, indicator := range s.Indicators {
+		indicator.Ticks--
+		if indicator.Ticks > 0 {
+			next = append(next, indicator)
+		}
+	}
+	s.Indicators = next
+}
+
+func (s *CombatState) StartAttack() {
+	s.AttackTick = AttackAnimationDuration
+}
+
+func (s *CombatState) StartHit() {
+	s.HitTick = HitAnimationDuration
+}
+
+func (s *CombatState) AddIndicator(kind CombatIndicatorKind, text string) {
+	if text == "" {
+		return
+	}
+
+	s.Indicators = append(s.Indicators, CombatIndicator{
+		Text:     text,
+		Kind:     kind,
+		Ticks:    CombatIndicatorDuration,
+		MaxTicks: CombatIndicatorDuration,
+	})
+	if len(s.Indicators) > 4 {
+		s.Indicators = s.Indicators[len(s.Indicators)-4:]
+	}
+	if kind == CombatIndicatorDamage {
+		s.StartHit()
+	}
 }
 
 // NearbyCharacter is a renderable character on the map.
@@ -71,6 +209,7 @@ type NearbyCharacter struct {
 	// Walk animation state
 	Walking  bool
 	WalkTick int // 0 to WalkDuration, increments each game tick
+	Combat   CombatState
 }
 
 // WalkDuration is how many game ticks a walk animation lasts.
@@ -119,6 +258,10 @@ type NearbyNPC struct {
 	Walking   bool
 	WalkTick  int
 	IdleTick  int
+	Dead      bool
+	DeathTick int
+	Hidden    bool
+	Combat    CombatState
 }
 
 const NpcIdleInterval = 30 // ~500ms at 60 TPS
@@ -127,6 +270,9 @@ const NpcWalkDuration = 16
 // StartWalk begins a walk from the current position to (destX, destY).
 // Matches the original client: X,Y is set to destination immediately.
 func (n *NearbyNPC) StartWalk(destX, destY, dir int) {
+	n.Dead = false
+	n.DeathTick = 0
+	n.Hidden = false
 	n.Direction = dir
 
 	// No actual movement
@@ -146,6 +292,12 @@ func (n *NearbyNPC) StartWalk(destX, destY, dir int) {
 
 // Tick advances NPC animation by one game tick.
 func (n *NearbyNPC) Tick() {
+	n.Combat.Tick()
+	if n.Dead {
+		n.DeathTick++
+		return
+	}
+
 	n.IdleTick++
 	if !n.Walking {
 		return
@@ -155,6 +307,33 @@ func (n *NearbyNPC) Tick() {
 		n.Walking = false
 		n.WalkTick = 0
 	}
+}
+
+func (n *NearbyNPC) StartDeath() {
+	n.Dead = true
+	n.DeathTick = 0
+	n.Hidden = false
+	n.Walking = false
+	n.WalkTick = 0
+	n.Combat.StartHit()
+}
+
+func (n *NearbyNPC) DeathProgress() float64 {
+	if !n.Dead {
+		return 0
+	}
+	progress := float64(n.DeathTick) / float64(NpcDeathAnimationTicks)
+	if progress < 0 {
+		return 0
+	}
+	if progress > 1 {
+		return 1
+	}
+	return progress
+}
+
+func (n *NearbyNPC) DeathComplete() bool {
+	return n.Dead && n.DeathTick >= NpcDeathAnimationTicks
 }
 
 func (n *NearbyNPC) WalkProgress() float64 {
@@ -200,6 +379,8 @@ type Client struct {
 	NearbyChars []NearbyCharacter
 	NearbyNpcs  []NearbyNPC
 	NearbyItems []NearbyItem
+	Inventory   []InventoryItem
+	Equipment   server.EquipmentPaperdoll
 
 	// UI state
 	Username string
@@ -224,6 +405,16 @@ type Event struct {
 	Type    EventType
 	Message string
 	Data    any
+}
+
+type UISnapshot struct {
+	PlayerID    int
+	Character   Character
+	Inventory   []InventoryItem
+	Equipment   server.EquipmentPaperdoll
+	NearbyChars []NearbyCharacter
+	NearbyNpcs  []NearbyNPC
+	NearbyItems []NearbyItem
 }
 
 func NewClient() *Client {
@@ -259,13 +450,52 @@ func (c *Client) Emit(evt Event) {
 	}
 }
 
+func (c *Client) EmitCritical(evt Event) {
+	c.Events <- evt
+}
+
 func (c *Client) Lock()   { c.mu.Lock() }
 func (c *Client) Unlock() { c.mu.Unlock() }
 
+func (c *Client) SetBus(bus *net.PacketBus) {
+	c.mu.Lock()
+	c.Bus = bus
+	c.mu.Unlock()
+}
+
+func (c *Client) GetBus() *net.PacketBus {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Bus
+}
+
+func (c *Client) UISnapshot() UISnapshot {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	snapshot := UISnapshot{
+		PlayerID:    c.PlayerID,
+		Character:   c.Character,
+		Inventory:   append([]InventoryItem(nil), c.Inventory...),
+		NearbyChars: append([]NearbyCharacter(nil), c.NearbyChars...),
+		NearbyNpcs:  append([]NearbyNPC(nil), c.NearbyNpcs...),
+		NearbyItems: append([]NearbyItem(nil), c.NearbyItems...),
+	}
+	snapshot.Equipment = c.Equipment
+	snapshot.Equipment.Ring = append([]int(nil), c.Equipment.Ring...)
+	snapshot.Equipment.Armlet = append([]int(nil), c.Equipment.Armlet...)
+	snapshot.Equipment.Bracer = append([]int(nil), c.Equipment.Bracer...)
+	return snapshot
+}
+
 func (c *Client) Disconnect() {
-	if c.Bus != nil {
-		c.Bus.Close()
-		c.Bus = nil
+	c.mu.Lock()
+	bus := c.Bus
+	c.Bus = nil
+	c.mu.Unlock()
+
+	if bus != nil {
+		bus.Close()
 	}
 	c.SetState(StateInitial)
 }

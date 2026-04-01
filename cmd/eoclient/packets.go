@@ -8,6 +8,17 @@ import (
 	"github.com/ethanmoffat/eolib-go/v3/protocol/net/client"
 )
 
+func (g *Game) startLocalAttackAnimation() {
+	for i := range g.client.NearbyChars {
+		if g.client.NearbyChars[i].PlayerID != g.client.PlayerID {
+			continue
+		}
+		g.client.NearbyChars[i].Direction = int(g.client.Character.Direction)
+		g.client.NearbyChars[i].Combat.StartAttack()
+		return
+	}
+}
+
 func newInitPacket(challenge int, version eonet.Version) *client.InitInitClientPacket {
 	return &client.InitInitClientPacket{
 		Challenge: challenge,
@@ -17,11 +28,12 @@ func newInitPacket(challenge int, version eonet.Version) *client.InitInitClientP
 }
 
 func (g *Game) sendLogin() {
-	if g.client.Bus == nil {
+	bus := g.client.GetBus()
+	if bus == nil {
 		return
 	}
 	slog.Info("sending login", "user", g.client.Username)
-	if err := g.client.Bus.SendSequenced(&client.LoginRequestClientPacket{
+	if err := bus.SendSequenced(&client.LoginRequestClientPacket{
 		Username: g.client.Username,
 		Password: g.client.Password,
 	}); err != nil {
@@ -30,11 +42,12 @@ func (g *Game) sendLogin() {
 }
 
 func (g *Game) sendSelectCharacter(charID int) {
-	if g.client.Bus == nil {
+	bus := g.client.GetBus()
+	if bus == nil {
 		return
 	}
 	slog.Info("selecting character", "charID", charID)
-	if err := g.client.Bus.SendSequenced(&client.WelcomeRequestClientPacket{
+	if err := bus.SendSequenced(&client.WelcomeRequestClientPacket{
 		CharacterId: charID,
 	}); err != nil {
 		slog.Error("send welcome request failed", "err", err)
@@ -42,7 +55,8 @@ func (g *Game) sendSelectCharacter(charID int) {
 }
 
 func (g *Game) sendWalk(dir int) {
-	if g.client.Bus == nil {
+	bus := g.client.GetBus()
+	if bus == nil {
 		return
 	}
 
@@ -68,7 +82,7 @@ func (g *Game) sendWalk(dir int) {
 		}
 	}
 
-	if err := g.client.Bus.SendSequenced(&client.WalkPlayerClientPacket{
+	if err := bus.SendSequenced(&client.WalkPlayerClientPacket{
 		WalkAction: client.WalkAction{
 			Direction: eoproto.Direction(dir),
 			Timestamp: 0,
@@ -80,10 +94,14 @@ func (g *Game) sendWalk(dir int) {
 }
 
 func (g *Game) sendAttack() {
-	if g.client.Bus == nil {
+	bus := g.client.GetBus()
+	if bus == nil {
 		return
 	}
-	if err := g.client.Bus.SendSequenced(&client.AttackUseClientPacket{
+	g.client.Lock()
+	g.startLocalAttackAnimation()
+	g.client.Unlock()
+	if err := bus.SendSequenced(&client.AttackUseClientPacket{
 		Direction: eoproto.Direction(g.client.Character.Direction),
 		Timestamp: 0,
 	}); err != nil {
@@ -92,7 +110,8 @@ func (g *Game) sendAttack() {
 }
 
 func (g *Game) sendFace(dir int) {
-	if g.client.Bus == nil {
+	bus := g.client.GetBus()
+	if bus == nil {
 		return
 	}
 	g.client.Character.Direction = eoproto.Direction(dir)
@@ -105,9 +124,19 @@ func (g *Game) sendFace(dir int) {
 		}
 	}
 
-	if err := g.client.Bus.SendSequenced(&client.FacePlayerClientPacket{
+	if err := bus.SendSequenced(&client.FacePlayerClientPacket{
 		Direction: eoproto.Direction(dir),
 	}); err != nil {
 		slog.Error("send face failed", "err", err)
+	}
+}
+
+func (g *Game) sendPickupItem(itemUID int) {
+	bus := g.client.GetBus()
+	if bus == nil || itemUID <= 0 {
+		return
+	}
+	if err := bus.SendSequenced(&client.ItemGetClientPacket{ItemIndex: itemUID}); err != nil {
+		slog.Error("send item pickup failed", "itemUID", itemUID, "err", err)
 	}
 }

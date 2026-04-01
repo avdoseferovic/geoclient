@@ -1,6 +1,9 @@
 package main
 
-import "github.com/avdo/eoweb/internal/render"
+import (
+	"github.com/avdo/eoweb/internal/game"
+	"github.com/avdo/eoweb/internal/render"
+)
 
 // syncEntities copies nearby entity data from game state into the map renderer.
 func (g *Game) syncEntities() {
@@ -9,33 +12,39 @@ func (g *Game) syncEntities() {
 
 	g.mapRenderer.Characters = g.mapRenderer.Characters[:0]
 	for _, ch := range g.client.NearbyChars {
-		frame := characterFrame(ch.Direction, ch.Walking, ch.WalkFrame())
+		frame := characterFrame(ch.Direction, ch.Walking, ch.WalkFrame(), ch.Combat.AttackTick)
 
 		g.mapRenderer.Characters = append(g.mapRenderer.Characters, render.CharacterEntity{
-			PlayerID:  ch.PlayerID,
-			Name:      ch.Name,
-			X:         ch.X,
-			Y:         ch.Y,
-			Direction: ch.Direction,
-			Gender:    ch.Gender,
-			Skin:      ch.Skin,
-			HairStyle: ch.HairStyle,
-			HairColor: ch.HairColor,
-			Armor:     ch.Armor,
-			Boots:     ch.Boots,
-			Hat:       ch.Hat,
-			Weapon:    ch.Weapon,
-			Shield:    ch.Shield,
-			Frame:     frame,
-			Walking:   ch.Walking,
-			WalkFrame: ch.WalkFrame(),
-			WalkProg:  ch.WalkProgress(),
-			Mirrored:  ch.Direction == 2 || ch.Direction == 3, // Up or Right
+			PlayerID:   ch.PlayerID,
+			Name:       ch.Name,
+			X:          ch.X,
+			Y:          ch.Y,
+			Direction:  ch.Direction,
+			Gender:     ch.Gender,
+			Skin:       ch.Skin,
+			HairStyle:  ch.HairStyle,
+			HairColor:  ch.HairColor,
+			Armor:      ch.Armor,
+			Boots:      ch.Boots,
+			Hat:        ch.Hat,
+			Weapon:     ch.Weapon,
+			Shield:     ch.Shield,
+			Frame:      frame,
+			Walking:    ch.Walking,
+			WalkFrame:  ch.WalkFrame(),
+			WalkProg:   ch.WalkProgress(),
+			Mirrored:   ch.Direction == 2 || ch.Direction == 3, // Up or Right
+			AttackProg: combatProgress(ch.Combat.AttackTick, game.AttackAnimationDuration),
+			HitProg:    combatProgress(ch.Combat.HitTick, game.HitAnimationDuration),
+			Indicators: syncIndicators(ch.Combat.Indicators),
 		})
 	}
 
 	g.mapRenderer.Npcs = g.mapRenderer.Npcs[:0]
 	for _, npc := range g.client.NearbyNpcs {
+		if npc.Hidden {
+			continue
+		}
 		// During walk: render from origin, offset toward destination
 		// When idle: render at current position (X,Y = destination)
 		rx, ry := npc.X, npc.Y
@@ -44,16 +53,21 @@ func (g *Game) syncEntities() {
 			rx, ry = npc.WalkFromX, npc.WalkFromY
 		}
 		g.mapRenderer.Npcs = append(g.mapRenderer.Npcs, render.NpcEntity{
-			Index:     npc.Index,
-			GraphicID: npc.ID,
-			X:         rx,
-			Y:         ry,
-			DestX:     dx,
-			DestY:     dy,
-			Direction: npc.Direction,
-			IdleFrame: npc.IdleFrame(),
-			Walking:   npc.Walking,
-			WalkProg:  npc.WalkProgress(),
+			Index:      npc.Index,
+			GraphicID:  npc.ID,
+			X:          rx,
+			Y:          ry,
+			DestX:      dx,
+			DestY:      dy,
+			Direction:  npc.Direction,
+			IdleFrame:  npc.IdleFrame(),
+			Walking:    npc.Walking,
+			WalkProg:   npc.WalkProgress(),
+			AttackProg: combatProgress(npc.Combat.AttackTick, game.AttackAnimationDuration),
+			HitProg:    combatProgress(npc.Combat.HitTick, game.HitAnimationDuration),
+			Dead:       npc.Dead,
+			DeathProg:  npc.DeathProgress(),
+			Indicators: syncIndicators(npc.Combat.Indicators),
 		})
 	}
 
@@ -71,8 +85,50 @@ func (g *Game) syncEntities() {
 // characterFrame picks the correct animation frame based on direction and walk state.
 // Directions: 0=Down, 1=Left, 2=Up, 3=Right
 // Down(0) and Right(3) use the down-right sprite. Left(1) and Up(2) use the up-left sprite.
-func characterFrame(dir int, walking bool, walkFrame int) render.CharacterFrame {
+func syncIndicators(indicators []game.CombatIndicator) []render.CombatIndicator {
+	if len(indicators) == 0 {
+		return nil
+	}
+
+	result := make([]render.CombatIndicator, 0, len(indicators))
+	for _, indicator := range indicators {
+		result = append(result, render.CombatIndicator{
+			Text:     indicator.Text,
+			Kind:     int(indicator.Kind),
+			Progress: indicator.Progress(),
+		})
+	}
+	return result
+}
+
+func combatProgress(ticks, maxTicks int) float64 {
+	if maxTicks <= 0 || ticks <= 0 {
+		return 0
+	}
+	progress := 1.0 - float64(ticks)/float64(maxTicks)
+	if progress < 0 {
+		return 0
+	}
+	if progress > 1 {
+		return 1
+	}
+	return progress
+}
+
+func characterFrame(dir int, walking bool, walkFrame int, attackTick int) render.CharacterFrame {
 	upLeft := dir == 1 || dir == 2
+	if attackTick > 0 {
+		if upLeft {
+			if attackTick > game.AttackAnimationDuration/2 {
+				return render.FrameMeleeUp1
+			}
+			return render.FrameMeleeUp2
+		}
+		if attackTick > game.AttackAnimationDuration/2 {
+			return render.FrameMeleeDown1
+		}
+		return render.FrameMeleeDown2
+	}
 
 	if walking {
 		base := render.FrameWalkDown1
