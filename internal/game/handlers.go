@@ -1,0 +1,290 @@
+package game
+
+import (
+	"fmt"
+	"log/slog"
+	"sync"
+
+	"github.com/ethanmoffat/eolib-go/v3/data"
+	"github.com/ethanmoffat/eolib-go/v3/encrypt"
+	eonet "github.com/ethanmoffat/eolib-go/v3/protocol/net"
+	"github.com/ethanmoffat/eolib-go/v3/protocol/net/client"
+	"github.com/ethanmoffat/eolib-go/v3/protocol/net/server"
+)
+
+type HandlerFunc func(c *Client, reader *data.EoReader) error
+
+type HandlerRegistry struct {
+	mu       sync.RWMutex
+	handlers map[eonet.PacketFamily]map[eonet.PacketAction]HandlerFunc
+}
+
+func NewHandlerRegistry() *HandlerRegistry {
+	return &HandlerRegistry{
+		handlers: make(map[eonet.PacketFamily]map[eonet.PacketAction]HandlerFunc),
+	}
+}
+
+func (r *HandlerRegistry) Register(family eonet.PacketFamily, action eonet.PacketAction, handler HandlerFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.handlers[family]; !ok {
+		r.handlers[family] = make(map[eonet.PacketAction]HandlerFunc)
+	}
+	r.handlers[family][action] = handler
+}
+
+func (r *HandlerRegistry) Dispatch(family eonet.PacketFamily, action eonet.PacketAction, c *Client, reader *data.EoReader) error {
+	r.mu.RLock()
+	familyHandlers, ok := r.handlers[family]
+	if !ok {
+		r.mu.RUnlock()
+		slog.Debug("unhandled packet family", "family", int(family), "action", int(action))
+		return nil
+	}
+	handler, ok := familyHandlers[action]
+	r.mu.RUnlock()
+	if !ok {
+		slog.Debug("unhandled packet action", "family", int(family), "action", int(action))
+		return nil
+	}
+	return handler(c, reader)
+}
+
+// RegisterAllHandlers registers all packet handlers.
+func RegisterAllHandlers(reg *HandlerRegistry) {
+	reg.Register(eonet.PacketFamily_Init, eonet.PacketAction_Init, handleInitInit)
+	reg.Register(eonet.PacketFamily_Connection, eonet.PacketAction_Player, handleConnectionPlayer)
+	reg.Register(eonet.PacketFamily_Login, eonet.PacketAction_Reply, handleLoginReply)
+	reg.Register(eonet.PacketFamily_Character, eonet.PacketAction_Reply, handleCharacterReply)
+	reg.Register(eonet.PacketFamily_Welcome, eonet.PacketAction_Reply, handleWelcomeReply)
+	reg.Register(eonet.PacketFamily_Talk, eonet.PacketAction_Player, handleTalkPlayer)
+	reg.Register(eonet.PacketFamily_Talk, eonet.PacketAction_Tell, handleTalkTell)
+	// Entity handlers registered separately
+	RegisterEntityHandlers(reg)
+}
+
+func handleInitInit(c *Client, reader *data.EoReader) error {
+	var pkt server.InitInitServerPacket
+	if err := pkt.Deserialize(reader); err != nil {
+		return fmt.Errorf("deserialize init: %w", err)
+	}
+
+	switch pkt.ReplyCode {
+	case server.InitReply_Ok:
+		return handleInitOk(c, pkt.ReplyCodeData.(*server.InitInitReplyCodeDataOk))
+	case server.InitReply_OutOfDate:
+		d := pkt.ReplyCodeData.(*server.InitInitReplyCodeDataOutOfDate)
+		c.Version = d.Version
+		slog.Info("server requested version update", "version", d.Version)
+		return nil
+	case server.InitReply_Banned:
+		c.Emit(Event{Type: EventError, Message: "You are banned from this server"})
+		return nil
+	default:
+		slog.Info("unhandled init reply", "code", pkt.ReplyCode)
+		return nil
+	}
+}
+
+func handleInitOk(c *Client, d *server.InitInitReplyCodeDataOk) error {
+	// Verify server challenge
+	expected := encrypt.ServerVerificationHash(c.Challenge)
+	if d.ChallengeResponse != expected {
+		c.Emit(Event{Type: EventError, Message: "Server verification failed"})
+		c.Disconnect()
+		return fmt.Errorf("server verification failed: got %d, expected %d", d.ChallengeResponse, expected)
+	}
+
+	c.PlayerID = d.PlayerId
+
+	// Set encryption multiples
+	c.Bus.SetEncryption(d.ClientEncryptionMultiple, d.ServerEncryptionMultiple)
+
+	// Set sequence from init values: value = seq1*7 + seq2 - 13
+	seqStart := d.Seq1*7 + d.Seq2 - 13
+	c.Bus.Sequencer.Reset(seqStart)
+	c.Bus.Sequencer.NextSequence() // consume slot 0
+
+	slog.Info("init complete", "playerID", c.PlayerID, "seqStart", seqStart)
+
+	// Send connection accept
+	if err := c.Bus.SendSequenced(&client.ConnectionAcceptClientPacket{
+		PlayerId:                 c.PlayerID,
+		ClientEncryptionMultiple: d.ClientEncryptionMultiple,
+		ServerEncryptionMultiple: d.ServerEncryptionMultiple,
+	}); err != nil {
+		return fmt.Errorf("send connection accept: %w", err)
+	}
+
+	c.SetState(StateConnected)
+	return nil
+}
+
+func handleConnectionPlayer(c *Client, reader *data.EoReader) error {
+	var pkt server.ConnectionPlayerServerPacket
+	if err := pkt.Deserialize(reader); err != nil {
+		return fmt.Errorf("deserialize ping: %w", err)
+	}
+
+	// Update sequence start: value = seq1 - seq2
+	c.Bus.Sequencer.SetStart(pkt.Seq1 - pkt.Seq2)
+
+	// Reply with pong
+	return c.Bus.SendSequenced(&client.ConnectionPingClientPacket{})
+}
+
+func handleLoginReply(c *Client, reader *data.EoReader) error {
+	var pkt server.LoginReplyServerPacket
+	if err := pkt.Deserialize(reader); err != nil {
+		return fmt.Errorf("deserialize login reply: %w", err)
+	}
+
+	switch pkt.ReplyCode {
+	case server.LoginReply_Ok:
+		d := pkt.ReplyCodeData.(*server.LoginReplyReplyCodeDataOk)
+		c.Characters = d.Characters
+		c.SetState(StateLoggedIn)
+		slog.Info("login successful", "characters", len(d.Characters))
+		c.Emit(Event{Type: EventCharacterList, Data: d.Characters})
+	case server.LoginReply_WrongUser:
+		c.Emit(Event{Type: EventError, Message: "Account not found"})
+	case server.LoginReply_WrongUserPassword:
+		c.Emit(Event{Type: EventError, Message: "Wrong password"})
+	case server.LoginReply_LoggedIn:
+		c.Emit(Event{Type: EventError, Message: "Already logged in"})
+	default:
+		c.Emit(Event{Type: EventError, Message: fmt.Sprintf("Login failed: code %d", pkt.ReplyCode)})
+	}
+	return nil
+}
+
+func handleCharacterReply(c *Client, reader *data.EoReader) error {
+	var pkt server.CharacterReplyServerPacket
+	if err := pkt.Deserialize(reader); err != nil {
+		return fmt.Errorf("deserialize character reply: %w", err)
+	}
+
+	d, ok := pkt.ReplyCodeData.(*server.CharacterReplyReplyCodeDataOk)
+	if !ok || len(d.Characters) == 0 {
+		c.Emit(Event{Type: EventError, Message: "Character creation failed"})
+		return nil
+	}
+
+	c.Characters = d.Characters
+	c.Emit(Event{Type: EventCharacterList, Data: d.Characters})
+	slog.Info("character list updated", "count", len(d.Characters))
+	return nil
+}
+
+func handleWelcomeReply(c *Client, reader *data.EoReader) error {
+	var pkt server.WelcomeReplyServerPacket
+	if err := pkt.Deserialize(reader); err != nil {
+		return fmt.Errorf("deserialize welcome reply: %w", err)
+	}
+
+	switch pkt.WelcomeCode {
+	case server.WelcomeCode_SelectCharacter:
+		d := pkt.WelcomeCodeData.(*server.WelcomeReplyWelcomeCodeDataSelectCharacter)
+		c.SessionID = d.SessionId
+		c.Character.ID = d.CharacterId
+		c.Character.MapID = int(d.MapId)
+		slog.Info("character selected", "sessionID", d.SessionId, "mapID", d.MapId)
+
+		// Send welcome message to enter game
+		return c.Bus.SendSequenced(&client.WelcomeMsgClientPacket{
+			SessionId:   d.SessionId,
+			CharacterId: d.CharacterId,
+		})
+
+	case server.WelcomeCode_EnterGame:
+		d := pkt.WelcomeCodeData.(*server.WelcomeReplyWelcomeCodeDataEnterGame)
+
+		// Populate nearby characters
+		c.NearbyChars = nil
+		for _, ch := range d.Nearby.Characters {
+			nc := NearbyCharacter{
+				PlayerID:  ch.PlayerId,
+				Name:      ch.Name,
+				X:         ch.Coords.X,
+				Y:         ch.Coords.Y,
+				Direction: int(ch.Direction),
+				Gender:    int(ch.Gender),
+				Skin:      ch.Skin,
+				HairStyle: ch.HairStyle,
+				HairColor: ch.HairColor,
+				Armor:     ch.Equipment.Armor,
+				Boots:     ch.Equipment.Boots,
+				Hat:       ch.Equipment.Hat,
+				Weapon:    ch.Equipment.Weapon,
+				Shield:    ch.Equipment.Shield,
+				SitState:  int(ch.SitState),
+				Level:     ch.Level,
+			}
+			c.NearbyChars = append(c.NearbyChars, nc)
+
+			if ch.PlayerId == c.PlayerID {
+				c.Character.X = ch.Coords.X
+				c.Character.Y = ch.Coords.Y
+				c.Character.Direction = ch.Direction
+				c.Character.Name = ch.Name
+			}
+		}
+
+		// Populate nearby NPCs
+		c.NearbyNpcs = nil
+		for _, npc := range d.Nearby.Npcs {
+			c.NearbyNpcs = append(c.NearbyNpcs, NearbyNPC{
+				Index:     npc.Index,
+				ID:        npc.Id,
+				X:         npc.Coords.X,
+				Y:         npc.Coords.Y,
+				Direction: int(npc.Direction),
+			})
+		}
+
+		// Populate nearby items
+		c.NearbyItems = nil
+		for _, item := range d.Nearby.Items {
+			c.NearbyItems = append(c.NearbyItems, NearbyItem{
+				UID:       item.Uid,
+				ID:        item.Id,
+				GraphicID: item.Id, // simplified; real mapping uses eif spec1
+				X:         item.Coords.X,
+				Y:         item.Coords.Y,
+				Amount:    item.Amount,
+			})
+		}
+
+		c.SetState(StateInGame)
+		slog.Info("entered game",
+			"map", c.Character.MapID,
+			"x", c.Character.X,
+			"y", c.Character.Y,
+			"name", c.Character.Name,
+			"chars", len(c.NearbyChars),
+			"npcs", len(c.NearbyNpcs),
+			"items", len(c.NearbyItems),
+		)
+		c.Emit(Event{Type: EventEnterGame, Data: d})
+	}
+	return nil
+}
+
+func handleTalkPlayer(c *Client, reader *data.EoReader) error {
+	var pkt server.TalkPlayerServerPacket
+	if err := pkt.Deserialize(reader); err != nil {
+		return err
+	}
+	c.Emit(Event{Type: EventChat, Message: fmt.Sprintf("[%d]: %s", pkt.PlayerId, pkt.Message)})
+	return nil
+}
+
+func handleTalkTell(c *Client, reader *data.EoReader) error {
+	var pkt server.TalkTellServerPacket
+	if err := pkt.Deserialize(reader); err != nil {
+		return err
+	}
+	c.Emit(Event{Type: EventChat, Message: fmt.Sprintf("[PM] %s: %s", pkt.PlayerName, pkt.Message)})
+	return nil
+}

@@ -1,0 +1,10 @@
+# Game assets
+gfx/
+maps/
+sfx/
+mfx/
+data/
+pub/
+
+# OS
+.DS_Store
