@@ -18,10 +18,11 @@ const (
 	HalfTileW     = TileWidth / 2  // 32
 	HalfTileH     = TileHeight / 2 // 16
 	HalfHalfTileH = HalfTileH / 2  // 8
+	GfxMapObjects = 4
 )
 
 // GFX file IDs for each map layer (9 layers).
-var layerGfxIDs = [9]int{3, 4, 5, 6, 6, 7, 3, 22, 5}
+var layerGfxIDs = [9]int{3, GfxMapObjects, 5, 6, 6, 7, 3, 22, 5}
 
 // MapRenderer handles isometric map rendering.
 type MapRenderer struct {
@@ -86,23 +87,66 @@ type drawCmd struct {
 	alpha float32 // 0 = use default (1.0)
 }
 
+type mapDrawState struct {
+	camSX        float64
+	camSY        float64
+	halfW        float64
+	halfH        float64
+	underlayCmds []drawCmd
+	overlayCmds  []drawCmd
+}
+
 // Draw renders the map centered on (CamX, CamY).
 func (r *MapRenderer) Draw(screen *ebiten.Image) {
+	r.DrawWithMid(screen, nil)
+}
+
+func (r *MapRenderer) DrawWithMid(screen *ebiten.Image, mid func()) {
 	if r.Map == nil {
 		return
 	}
 
+	state := r.buildDrawState(screen)
+
+	// Draw base layers first, then entities, then object/top layers over them.
+	drawCmds(screen, state.underlayCmds)
+	if mid != nil {
+		mid()
+	}
+
+	// Draw entities on top of ground/shadow layers, sorted by Y for depth
+	r.drawEntities(screen, state.camSX, state.camSY, state.halfW, state.halfH)
+	drawCmds(screen, state.overlayCmds)
+}
+
+func shouldDrawTileAboveEntities(layerIdx, imgHeight int) bool {
+	// Keep normal objects/walls under entities.
+	// Only very tall object-layer sprites, such as trees, should cover them.
+	return layerIdx == 1 && imgHeight >= 100
+}
+
+func drawCmds(screen *ebiten.Image, cmds []drawCmd) {
+	for _, cmd := range cmds {
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Translate(cmd.sx, cmd.sy)
+		if cmd.alpha > 0 {
+			op.ColorScale.ScaleAlpha(cmd.alpha)
+		}
+		screen.DrawImage(cmd.img, op)
+	}
+}
+
+func (r *MapRenderer) buildDrawState(screen *ebiten.Image) mapDrawState {
 	sw, sh := screen.Bounds().Dx(), screen.Bounds().Dy()
-	halfW, halfH := float64(sw)/2, float64(sh)/2
+	state := mapDrawState{
+		halfW: float64(sw) / 2,
+		halfH: float64(sh) / 2,
+	}
 
-	// Camera screen offset (includes walk animation smoothing)
-	camSX, camSY := IsoToScreen(r.CamX, r.CamY)
-	camSX += r.CamOffX
-	camSY += r.CamOffY
+	state.camSX, state.camSY = IsoToScreen(r.CamX, r.CamY)
+	state.camSX += r.CamOffX
+	state.camSY += r.CamOffY
 
-	var cmds []drawCmd
-
-	// Draw each of the 9 graphic layers
 	for layerIdx := 0; layerIdx < 9 && layerIdx < len(r.Map.GraphicLayers); layerIdx++ {
 		layer := r.Map.GraphicLayers[layerIdx]
 		gfxFileID := layerGfxIDs[layerIdx]
@@ -122,56 +166,47 @@ func (r *MapRenderer) Draw(screen *ebiten.Image) {
 				}
 
 				sx, sy := IsoToScreen(float64(x), float64(y))
-				// Offset from camera
-				sx = sx - camSX + halfW
-				sy = sy - camSY + halfH
+				sx = sx - state.camSX + state.halfW
+				sy = sy - state.camSY + state.halfH
 
-				// Adjust for tile anchor (center-bottom of tile)
 				imgW := float64(img.Bounds().Dx())
 				imgH := float64(img.Bounds().Dy())
 				sx -= imgW / 2
 				sy -= imgH - HalfTileH
 
-				// Skip off-screen tiles
 				if sx+imgW < 0 || sx > float64(sw) || sy+imgH < 0 || sy > float64(sh) {
 					continue
 				}
 
 				depth := layerDepth(layerIdx, x, y)
 				var alpha float32
-				if layerIdx == 7 { // Shadow layer
+				if layerIdx == 7 {
 					alpha = 0.2
 				}
-				cmds = append(cmds, drawCmd{img: img, sx: sx, sy: sy, depth: depth, alpha: alpha})
+				target := &state.underlayCmds
+				if shouldDrawTileAboveEntities(layerIdx, int(imgH)) {
+					target = &state.overlayCmds
+				}
+				*target = append(*target, drawCmd{img: img, sx: sx, sy: sy, depth: depth, alpha: alpha})
 			}
 		}
 
-		// Fill tile for ground layer
 		if layerIdx == 0 && r.Map.FillTile > 0 {
 			fillImg, err := r.Loader.GetImage(gfxFileID, r.Map.FillTile)
 			if err == nil && fillImg != nil {
-				r.drawFillTiles(screen, fillImg, camSX, camSY, halfW, halfH, &cmds)
+				r.drawFillTiles(screen, fillImg, state.camSX, state.camSY, state.halfW, state.halfH, &state.underlayCmds)
 			}
 		}
 	}
 
-	// Sort by depth for correct draw order
-	sort.Slice(cmds, func(i, j int) bool {
-		return cmds[i].depth < cmds[j].depth
+	sort.Slice(state.underlayCmds, func(i, j int) bool {
+		return state.underlayCmds[i].depth < state.underlayCmds[j].depth
+	})
+	sort.Slice(state.overlayCmds, func(i, j int) bool {
+		return state.overlayCmds[i].depth < state.overlayCmds[j].depth
 	})
 
-	// Draw all tiles
-	for _, cmd := range cmds {
-		op := &ebiten.DrawImageOptions{}
-		op.GeoM.Translate(cmd.sx, cmd.sy)
-		if cmd.alpha > 0 {
-			op.ColorScale.ScaleAlpha(cmd.alpha)
-		}
-		screen.DrawImage(cmd.img, op)
-	}
-
-	// Draw entities on top of ground/shadow layers, sorted by Y for depth
-	r.drawEntities(screen, camSX, camSY, halfW, halfH)
+	return state
 }
 
 func (r *MapRenderer) drawFillTiles(screen *ebiten.Image, fillImg *ebiten.Image, camSX, camSY, halfW, halfH float64, cmds *[]drawCmd) {
@@ -182,7 +217,7 @@ func (r *MapRenderer) drawFillTiles(screen *ebiten.Image, fillImg *ebiten.Image,
 	for y := 0; y <= r.Map.Height; y++ {
 		for x := 0; x <= r.Map.Width; x++ {
 			// Skip tiles that have explicit ground graphics
-			if r.hasTileAt(0, x, y) {
+			if r.HasTileAt(0, x, y) {
 				continue
 			}
 
@@ -199,7 +234,10 @@ func (r *MapRenderer) drawFillTiles(screen *ebiten.Image, fillImg *ebiten.Image,
 	}
 }
 
-func (r *MapRenderer) hasTileAt(layerIdx, x, y int) bool {
+func (r *MapRenderer) HasTileAt(layerIdx, x, y int) bool {
+	if r == nil || r.Map == nil {
+		return false
+	}
 	if layerIdx >= len(r.Map.GraphicLayers) {
 		return false
 	}

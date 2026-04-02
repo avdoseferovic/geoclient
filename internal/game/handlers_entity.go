@@ -121,6 +121,10 @@ func syncLocalVitalsFromCharacter(c *Client, ch server.CharacterMapInfo) {
 	c.Character.MaxTP = ch.MaxTp
 }
 
+func visibleEquipmentFromCharacterMapInfo(ch server.CharacterMapInfo) (boots, armor, hat, weapon, shield int) {
+	return ch.Equipment.Boots, ch.Equipment.Armor, ch.Equipment.Hat, ch.Equipment.Weapon, ch.Equipment.Shield
+}
+
 func handleAvatarAgreeEntity(c *Client, reader *data.EoReader) error {
 	var pkt server.AvatarAgreeServerPacket
 	if err := pkt.Deserialize(reader); err != nil {
@@ -139,9 +143,6 @@ func handleAvatarAgreeEntity(c *Client, reader *data.EoReader) error {
 	case server.AvatarChange_Equipment:
 		if update, ok := pkt.Change.ChangeTypeData.(*server.ChangeTypeDataEquipment); ok {
 			applyEquipmentChange(ch, update.Equipment)
-			if pkt.Change.PlayerId == c.PlayerID {
-				syncVisibleEquipment(c, nearbyCharacterView(*ch))
-			}
 		}
 	case server.AvatarChange_Hair:
 		if update, ok := pkt.Change.ChangeTypeData.(*server.ChangeTypeDataHair); ok {
@@ -269,6 +270,7 @@ func handlePlayersAgree(c *Client, reader *data.EoReader) error {
 			}
 		}
 		if !found {
+			boots, armor, hat, weapon, shield := visibleEquipmentFromCharacterMapInfo(ch)
 			c.NearbyChars = append(c.NearbyChars, NearbyCharacter{
 				PlayerID:  ch.PlayerId,
 				Name:      ch.Name,
@@ -279,11 +281,11 @@ func handlePlayersAgree(c *Client, reader *data.EoReader) error {
 				Skin:      ch.Skin,
 				HairStyle: ch.HairStyle,
 				HairColor: ch.HairColor,
-				Armor:     ch.Equipment.Armor,
-				Boots:     ch.Equipment.Boots,
-				Hat:       ch.Equipment.Hat,
-				Weapon:    ch.Equipment.Weapon,
-				Shield:    ch.Equipment.Shield,
+				Armor:     armor,
+				Boots:     boots,
+				Hat:       hat,
+				Weapon:    weapon,
+				Shield:    shield,
 				SitState:  int(ch.SitState),
 				Level:     ch.Level,
 			})
@@ -564,19 +566,17 @@ func handleRefreshReply(c *Client, reader *data.EoReader) error {
 	c.NearbyChars = nil
 	for _, ch := range pkt.Nearby.Characters {
 		syncLocalVitalsFromCharacter(c, ch)
+		boots, armor, hat, weapon, shield := visibleEquipmentFromCharacterMapInfo(ch)
 		nc := NearbyCharacter{
-			PlayerID: ch.PlayerId, Name: ch.Name,
+			PlayerID: ch.PlayerId, Name: ch.Name, GuildTag: ch.GuildTag,
 			X: ch.Coords.X, Y: ch.Coords.Y,
 			Direction: int(ch.Direction), Gender: int(ch.Gender),
 			Skin: ch.Skin, HairStyle: ch.HairStyle, HairColor: ch.HairColor,
-			Armor: ch.Equipment.Armor, Boots: ch.Equipment.Boots,
-			Hat: ch.Equipment.Hat, Weapon: ch.Equipment.Weapon,
-			Shield: ch.Equipment.Shield, SitState: int(ch.SitState), Level: ch.Level,
+			Armor: armor, Boots: boots,
+			Hat: hat, Weapon: weapon,
+			Shield: shield, SitState: int(ch.SitState), Level: ch.Level,
 		}
 		c.NearbyChars = append(c.NearbyChars, nc)
-		if ch.PlayerId == c.PlayerID {
-			syncVisibleEquipment(c, nearbyCharacterView(nc))
-		}
 	}
 
 	c.NearbyNpcs = nil
@@ -739,7 +739,6 @@ func handlePaperdollReply(c *Client, reader *data.EoReader) error {
 
 	syncPaperdollDetails(c, pkt.Details)
 	c.Equipment = pkt.Equipment
-	syncPaperdollVisibleState(c, pkt.Details.PlayerId, pkt.Equipment)
 	return nil
 }
 
@@ -792,47 +791,6 @@ func applyPaperdollAvatarChange(c *Client, change server.AvatarChange) {
 				ch.HairColor = update.HairColor
 			}
 		}
-	}
-
-	if change.PlayerId != c.PlayerID {
-		return
-	}
-
-	switch change.ChangeType {
-	case server.AvatarChange_Equipment:
-		if update, ok := change.ChangeTypeData.(*server.ChangeTypeDataEquipment); ok {
-			c.Equipment.Boots = update.Equipment.Boots
-			c.Equipment.Armor = update.Equipment.Armor
-			c.Equipment.Hat = update.Equipment.Hat
-			c.Equipment.Weapon = update.Equipment.Weapon
-			c.Equipment.Shield = update.Equipment.Shield
-		}
-	case server.AvatarChange_Hair:
-		if update, ok := change.ChangeTypeData.(*server.ChangeTypeDataHair); ok {
-			if ch := findCharacter(c.NearbyChars, c.PlayerID); ch != nil {
-				ch.HairStyle = update.HairStyle
-				ch.HairColor = update.HairColor
-			}
-		}
-	case server.AvatarChange_HairColor:
-		if update, ok := change.ChangeTypeData.(*server.ChangeTypeDataHairColor); ok {
-			if ch := findCharacter(c.NearbyChars, c.PlayerID); ch != nil {
-				ch.HairColor = update.HairColor
-			}
-		}
-	}
-}
-
-func syncPaperdollVisibleState(c *Client, playerID int, equipment server.EquipmentPaperdoll) {
-	if playerID != c.PlayerID {
-		return
-	}
-	if ch := findCharacter(c.NearbyChars, playerID); ch != nil {
-		ch.Boots = equipment.Boots
-		ch.Armor = equipment.Armor
-		ch.Hat = equipment.Hat
-		ch.Shield = equipment.Shield
-		ch.Weapon = equipment.Weapon
 	}
 }
 

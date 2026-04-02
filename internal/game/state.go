@@ -100,7 +100,7 @@ const (
 
 const (
 	CombatIndicatorDuration = 45
-	AttackAnimationDuration = 12
+	AttackAnimationDuration = 18
 	HitAnimationDuration    = 10
 	NpcDeathAnimationTicks  = 24
 )
@@ -192,6 +192,7 @@ func (s *CombatState) AddIndicator(kind CombatIndicatorKind, text string) {
 type NearbyCharacter struct {
 	PlayerID  int
 	Name      string
+	GuildTag  string
 	X, Y      int
 	Direction int
 	Gender    int
@@ -212,8 +213,8 @@ type NearbyCharacter struct {
 	Combat   CombatState
 }
 
-// WalkDuration is how many game ticks a walk animation lasts.
-const WalkDuration = 16
+// WalkDuration controls how long tile-to-tile travel takes in the local client.
+const WalkDuration = 24
 
 // TickWalk advances walk animation by one tick. Returns true when walk completes.
 func (c *NearbyCharacter) TickWalk() bool {
@@ -264,8 +265,9 @@ type NearbyNPC struct {
 	Combat    CombatState
 }
 
-const NpcIdleInterval = 30 // ~500ms at 60 TPS
-const NpcWalkDuration = 16
+// NPC idle and walk timings are tuned separately from character travel speed.
+const NpcIdleInterval = 6
+const NpcWalkDuration = 24
 
 // StartWalk begins a walk from the current position to (destX, destY).
 // Matches the original client: X,Y is set to destination immediately.
@@ -341,6 +343,15 @@ func (n *NearbyNPC) WalkProgress() float64 {
 		return 0
 	}
 	return float64(n.WalkTick) / float64(NpcWalkDuration)
+}
+
+func (n *NearbyNPC) WalkFrame() int {
+	ticksPerFrame := NpcWalkDuration / 4
+	frame := n.WalkTick / ticksPerFrame
+	if frame > 3 {
+		frame = 3
+	}
+	return frame
 }
 
 func (n *NearbyNPC) IdleFrame() int {

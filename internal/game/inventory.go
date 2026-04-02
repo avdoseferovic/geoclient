@@ -162,30 +162,6 @@ func applyEquipmentWelcome(c *Client, equipment server.EquipmentWelcome) {
 	}
 }
 
-func syncVisibleEquipment(c *Client, ch serverCharacterView) {
-	c.Equipment.Boots = ch.boots()
-	c.Equipment.Armor = ch.armor()
-	c.Equipment.Hat = ch.hat()
-	c.Equipment.Shield = ch.shield()
-	c.Equipment.Weapon = ch.weapon()
-}
-
-type serverCharacterView interface {
-	boots() int
-	armor() int
-	hat() int
-	shield() int
-	weapon() int
-}
-
-type nearbyCharacterView NearbyCharacter
-
-func (c nearbyCharacterView) boots() int  { return c.Boots }
-func (c nearbyCharacterView) armor() int  { return c.Armor }
-func (c nearbyCharacterView) hat() int    { return c.Hat }
-func (c nearbyCharacterView) shield() int { return c.Shield }
-func (c nearbyCharacterView) weapon() int { return c.Weapon }
-
 func firstNonEmpty(value, fallback string) string {
 	if value != "" {
 		return value

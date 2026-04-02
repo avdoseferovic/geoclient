@@ -5,7 +5,6 @@ import (
 	"image/color"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/text"
 	"golang.org/x/image/font/basicfont"
 
@@ -57,6 +56,7 @@ type NpcEntity struct {
 	Direction    int
 	IdleFrame    int // 0 or 1 for idle animation
 	Walking      bool
+	WalkFrame    int
 	WalkProg     float64 // 0.0 to 1.0
 	AttackProg   float64
 	HitProg      float64
@@ -75,6 +75,14 @@ type attachmentOffset struct {
 	X float64
 	Y float64
 }
+
+type hatMaskType int
+
+const (
+	hatMaskStandard hatMaskType = iota
+	hatMaskFaceMask
+	hatMaskHideHair
+)
 
 // ItemEntity represents a dropped item on the map.
 type ItemEntity struct {
@@ -168,25 +176,30 @@ func RenderCharacter(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEnti
 
 	sub := img.SubImage(image.Rect(srcX, srcY, srcX+w, srcY+h)).(*ebiten.Image)
 
-	// Position: sx,sy is the tile center (top of diamond).
-	// Character feet should be at tile center: offset so bottom-center of sprite aligns.
-	drawX := sx - float64(w)/2
-	drawY := sy - float64(h) + HalfHalfTileH
+	drawX, drawY := CharacterDrawPosition(ch.Gender, frame, ch.Direction, sx, sy, w, h)
+	maskType := hatMask(ch.Hat)
 
+	renderCharacterBackBehind(screen, loader, ch, frame, drawX, drawY, w, h)
 	renderCharacterWeaponBehind(screen, loader, ch, frame, drawX, drawY, w, h)
+	if maskType != hatMaskHideHair {
+		renderHairBehind(screen, loader, ch, frame, drawX, drawY, w, h)
+	}
 	renderImage(screen, sub, drawX, drawY, ch.Mirrored, 1.0, ch.HitProg)
 	renderBoots(screen, loader, ch, frame, drawX, drawY, w, h)
 	renderArmor(screen, loader, ch, frame, drawX, drawY, w, h)
-	renderHair(screen, loader, ch, frame, drawX, drawY, w, h)
-	renderHat(screen, loader, ch, frame, drawX, drawY, w, h)
+	if maskType == hatMaskFaceMask {
+		renderHat(screen, loader, ch, frame, drawX, drawY, w, h)
+	}
+	if maskType != hatMaskHideHair {
+		renderHairFront(screen, loader, ch, frame, drawX, drawY, w, h)
+	}
+	if maskType != hatMaskFaceMask {
+		renderHat(screen, loader, ch, frame, drawX, drawY, w, h)
+	}
 	renderShield(screen, loader, ch, frame, drawX, drawY, w, h)
+	renderCharacterBackFront(screen, loader, ch, frame, drawX, drawY, w, h)
 	renderCharacterWeaponFront(screen, loader, ch, frame, drawX, drawY, w, h)
 	renderIndicators(screen, ch.Indicators, sx, drawY-30)
-
-	// Draw nameplate above character
-	nameX := sx - float64(len(ch.Name)*3)
-	nameY := drawY - 12
-	ebitenutil.DebugPrintAt(screen, ch.Name, int(nameX), int(nameY))
 }
 
 func renderImage(screen, img *ebiten.Image, x, y float64, mirrored bool, alpha float32, hitProg float64) {
@@ -211,7 +224,7 @@ func renderImage(screen, img *ebiten.Image, x, y float64, mirrored bool, alpha f
 	screen.DrawImage(img, op)
 }
 
-func renderHair(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, frame CharacterFrame, bodyX, bodyY float64, charW, charH int) {
+func renderHairBehind(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, frame CharacterFrame, bodyX, bodyY float64, charW, charH int) {
 	if ch.HairStyle == 0 {
 		return
 	}
@@ -219,11 +232,33 @@ func renderHair(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, f
 	baseID := (ch.HairStyle-1)*40 + ch.HairColor*4
 	gfxFile := GenderGfx(ch.Gender, GfxFemaleHair, GfxMaleHair)
 
-	// Hair has 4 sub-images: 1=down-right, 2=down-right behind, 3=up-left, 4=up-left behind
+	// Hair has 4 sub-images: 1=down-right behind, 2=down-right front, 3=up-left behind, 4=up-left front.
 	upLeft := isUpLeft(frame)
-	hairID := baseID + 1 // front down-right
+	hairID := baseID + 1
 	if upLeft {
-		hairID = baseID + 3 // front up-left
+		hairID = baseID + 3
+	}
+
+	img, err := loader.GetImage(gfxFile, hairID)
+	if err != nil || img == nil {
+		return
+	}
+
+	offset := hairOffset(ch.Gender, frame)
+	renderAttachment(screen, img, bodyX, bodyY, charW, charH, offset, ch.Mirrored, true, 1.0, ch.HitProg)
+}
+
+func renderHairFront(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, frame CharacterFrame, bodyX, bodyY float64, charW, charH int) {
+	if ch.HairStyle == 0 {
+		return
+	}
+
+	baseID := (ch.HairStyle-1)*40 + ch.HairColor*4
+	gfxFile := GenderGfx(ch.Gender, GfxFemaleHair, GfxMaleHair)
+
+	hairID := baseID + 2
+	if isUpLeft(frame) {
+		hairID = baseID + 4
 	}
 
 	img, err := loader.GetImage(gfxFile, hairID)
@@ -299,7 +334,7 @@ func renderHat(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, fr
 }
 
 func renderShield(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, frame CharacterFrame, bodyX, bodyY float64, charW, charH int) {
-	if ch.Shield == 0 {
+	if ch.Shield == 0 || isBackGraphic(ch.Shield) {
 		return
 	}
 
@@ -311,6 +346,35 @@ func renderShield(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity,
 	}
 
 	offset := shieldOffset(ch.Gender, frame)
+	renderAttachment(screen, img, bodyX, bodyY, charW, charH, offset, ch.Mirrored, true, 1.0, ch.HitProg)
+}
+
+func renderCharacterBackBehind(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, frame CharacterFrame, bodyX, bodyY float64, charW, charH int) {
+	if ch.Shield == 0 || !isBackGraphic(ch.Shield) || isUpLeft(frame) {
+		return
+	}
+
+	renderCharacterBack(screen, loader, ch, frame, bodyX, bodyY, charW, charH)
+}
+
+func renderCharacterBackFront(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, frame CharacterFrame, bodyX, bodyY float64, charW, charH int) {
+	if ch.Shield == 0 || !isBackGraphic(ch.Shield) || !isUpLeft(frame) {
+		return
+	}
+
+	renderCharacterBack(screen, loader, ch, frame, bodyX, bodyY, charW, charH)
+}
+
+func renderCharacterBack(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, frame CharacterFrame, bodyX, bodyY float64, charW, charH int) {
+	baseID := (ch.Shield - 1) * 50
+	backID := baseID + backFrameNumber(frame) + 1
+
+	img, err := loader.GetImage(GenderGfx(ch.Gender, GfxFemaleBack, GfxMaleBack), backID)
+	if err != nil || img == nil {
+		return
+	}
+
+	offset := backOffset(ch.Gender, frame)
 	renderAttachment(screen, img, bodyX, bodyY, charW, charH, offset, ch.Mirrored, true, 1.0, ch.HitProg)
 }
 
@@ -390,6 +454,41 @@ func weaponGraphicID(weapon int, frame CharacterFrame) (int, bool) {
 	return (weapon-1)*100 + index + 1, true
 }
 
+func isBackGraphic(shield int) bool {
+	switch shield {
+	case 10, 11, 14, 15, 16, 18, 19:
+		return true
+	default:
+		return false
+	}
+}
+
+func hatMask(hat int) hatMaskType {
+	switch hat {
+	case 7, 8, 9, 10, 11, 12, 13, 14, 15, 32, 33, 48, 50:
+		return hatMaskFaceMask
+	case 16, 17, 18, 19, 20, 21, 25, 26, 28, 30, 31, 34, 35, 36, 37, 38, 40, 41, 44, 46, 47:
+		return hatMaskHideHair
+	default:
+		return hatMaskStandard
+	}
+}
+
+func backFrameNumber(frame CharacterFrame) int {
+	switch frame {
+	case FrameStandDown, FrameWalkDown1, FrameWalkDown2, FrameWalkDown3, FrameWalkDown4, FrameRaisedDown, FrameChairDown, FrameFloorDown:
+		return 0
+	case FrameStandUp, FrameWalkUp1, FrameWalkUp2, FrameWalkUp3, FrameWalkUp4, FrameRaisedUp, FrameChairUp, FrameFloorUp:
+		return 1
+	case FrameMeleeDown1, FrameMeleeDown2, FrameRangeDown:
+		return 2
+	case FrameMeleeUp1, FrameMeleeUp2, FrameRangeUp:
+		return 3
+	default:
+		return 0
+	}
+}
+
 // RenderNPC draws an NPC at the given screen position.
 func RenderNPC(screen *ebiten.Image, loader *gfx.Loader, npc *NpcEntity, sx, sy float64) {
 	if npc.GraphicID <= 0 {
@@ -421,6 +520,12 @@ func RenderNPC(screen *ebiten.Image, loader *gfx.Loader, npc *NpcEntity, sx, sy 
 	if upLeft {
 		frameIdx = 3 // standing up frame 1
 	}
+	if npc.Walking {
+		frameIdx = 5 + npc.WalkFrame
+		if upLeft {
+			frameIdx = 9 + npc.WalkFrame
+		}
+	}
 
 	// Idle animation disabled — requires ENF metadata (animatedStanding flag)
 	// to know which NPCs have a second standing frame. Without it, toggling
@@ -444,7 +549,8 @@ func RenderNPC(screen *ebiten.Image, loader *gfx.Loader, npc *NpcEntity, sx, sy 
 		sy -= npc.DeathProg * 8
 	}
 
-	renderImage(screen, img, sx-w/2, sy-h+HalfTileH, mirrored, alpha, npc.HitProg)
+	drawX, drawY := NPCDrawPosition(npc.GraphicID, mirrored, sx, sy, w, h)
+	renderImage(screen, img, drawX, drawY, mirrored, alpha, npc.HitProg)
 	renderIndicators(screen, npc.Indicators, sx, sy-h-10)
 }
 
@@ -516,6 +622,14 @@ func attackOffset(dir int, progress float64) (float64, float64) {
 func hairOffset(gender int, frame CharacterFrame) attachmentOffset {
 	if gender == 0 {
 		switch frame {
+		case FrameChairDown:
+			return attachmentOffset{1, -13}
+		case FrameChairUp:
+			return attachmentOffset{2, -13}
+		case FrameFloorDown:
+			return attachmentOffset{1, -8}
+		case FrameFloorUp:
+			return attachmentOffset{3, -8}
 		case FrameMeleeDown1, FrameMeleeUp1:
 			return attachmentOffset{0, -14}
 		case FrameMeleeDown2:
@@ -524,6 +638,10 @@ func hairOffset(gender int, frame CharacterFrame) attachmentOffset {
 			return attachmentOffset{-4, -13}
 		case FrameRaisedDown, FrameRaisedUp:
 			return attachmentOffset{-1, -12}
+		case FrameRangeDown:
+			return attachmentOffset{5, -15}
+		case FrameRangeUp:
+			return attachmentOffset{3, -14}
 		default:
 			return attachmentOffset{-1, -14}
 		}
@@ -532,6 +650,12 @@ func hairOffset(gender int, frame CharacterFrame) attachmentOffset {
 	switch frame {
 	case FrameWalkDown1, FrameWalkDown2, FrameWalkDown3, FrameWalkDown4:
 		return attachmentOffset{0, -15}
+	case FrameChairDown, FrameChairUp:
+		return attachmentOffset{2, -12}
+	case FrameFloorDown:
+		return attachmentOffset{2, -7}
+	case FrameFloorUp:
+		return attachmentOffset{4, -7}
 	case FrameMeleeDown1, FrameMeleeUp1:
 		return attachmentOffset{1, -15}
 	case FrameMeleeDown2:
@@ -540,6 +664,10 @@ func hairOffset(gender int, frame CharacterFrame) attachmentOffset {
 		return attachmentOffset{-3, -14}
 	case FrameRaisedDown, FrameRaisedUp:
 		return attachmentOffset{-1, -13}
+	case FrameRangeDown:
+		return attachmentOffset{4, -15}
+	case FrameRangeUp:
+		return attachmentOffset{2, -15}
 	default:
 		return attachmentOffset{-1, -15}
 	}
@@ -762,5 +890,53 @@ func shieldOffset(gender int, frame CharacterFrame) attachmentOffset {
 		return attachmentOffset{-5, 6}
 	default:
 		return attachmentOffset{-5, 4}
+	}
+}
+
+func backOffset(gender int, frame CharacterFrame) attachmentOffset {
+	if gender == 0 {
+		switch frame {
+		case FrameWalkDown1, FrameWalkDown2, FrameWalkDown3, FrameWalkDown4,
+			FrameWalkUp1, FrameWalkUp2, FrameWalkUp3, FrameWalkUp4,
+			FrameMeleeDown1, FrameMeleeDown2, FrameMeleeUp1, FrameMeleeUp2:
+			return attachmentOffset{0, -17}
+		case FrameRaisedDown, FrameRaisedUp:
+			return attachmentOffset{0, -15}
+		case FrameChairDown:
+			return attachmentOffset{2, -16}
+		case FrameChairUp:
+			return attachmentOffset{3, -16}
+		case FrameFloorDown:
+			return attachmentOffset{2, -11}
+		case FrameFloorUp:
+			return attachmentOffset{4, -11}
+		case FrameRangeDown, FrameRangeUp:
+			return attachmentOffset{1, -17}
+		default:
+			return attachmentOffset{0, -17}
+		}
+	}
+
+	switch frame {
+	case FrameWalkDown1, FrameWalkDown2, FrameWalkDown3, FrameWalkDown4:
+		return attachmentOffset{1, -18}
+	case FrameWalkUp1, FrameWalkUp2, FrameWalkUp3, FrameWalkUp4:
+		return attachmentOffset{0, -18}
+	case FrameMeleeDown1, FrameMeleeUp1:
+		return attachmentOffset{2, -18}
+	case FrameMeleeDown2, FrameMeleeUp2:
+		return attachmentOffset{-2, -18}
+	case FrameRaisedDown, FrameRaisedUp:
+		return attachmentOffset{0, -16}
+	case FrameChairDown, FrameChairUp:
+		return attachmentOffset{3, -15}
+	case FrameFloorDown:
+		return attachmentOffset{3, -10}
+	case FrameFloorUp:
+		return attachmentOffset{5, -10}
+	case FrameRangeDown, FrameRangeUp:
+		return attachmentOffset{2, -18}
+	default:
+		return attachmentOffset{0, -18}
 	}
 }

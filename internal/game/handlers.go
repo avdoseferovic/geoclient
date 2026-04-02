@@ -223,9 +223,11 @@ func handleWelcomeReply(c *Client, reader *data.EoReader) error {
 		c.NearbyChars = nil
 		for _, ch := range d.Nearby.Characters {
 			syncLocalVitalsFromCharacter(c, ch)
+			boots, armor, hat, weapon, shield := visibleEquipmentFromCharacterMapInfo(ch)
 			nc := NearbyCharacter{
 				PlayerID:  ch.PlayerId,
 				Name:      ch.Name,
+				GuildTag:  ch.GuildTag,
 				X:         ch.Coords.X,
 				Y:         ch.Coords.Y,
 				Direction: int(ch.Direction),
@@ -233,18 +235,15 @@ func handleWelcomeReply(c *Client, reader *data.EoReader) error {
 				Skin:      ch.Skin,
 				HairStyle: ch.HairStyle,
 				HairColor: ch.HairColor,
-				Armor:     ch.Equipment.Armor,
-				Boots:     ch.Equipment.Boots,
-				Hat:       ch.Equipment.Hat,
-				Weapon:    ch.Equipment.Weapon,
-				Shield:    ch.Equipment.Shield,
+				Armor:     armor,
+				Boots:     boots,
+				Hat:       hat,
+				Weapon:    weapon,
+				Shield:    shield,
 				SitState:  int(ch.SitState),
 				Level:     ch.Level,
 			}
 			c.NearbyChars = append(c.NearbyChars, nc)
-			if ch.PlayerId == c.PlayerID {
-				syncVisibleEquipment(c, nearbyCharacterView(nc))
-			}
 
 		}
 

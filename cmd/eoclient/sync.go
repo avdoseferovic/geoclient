@@ -62,6 +62,7 @@ func (g *Game) syncEntities() {
 			Direction:  npc.Direction,
 			IdleFrame:  npc.IdleFrame(),
 			Walking:    npc.Walking,
+			WalkFrame:  npc.WalkFrame(),
 			WalkProg:   npc.WalkProgress(),
 			AttackProg: combatProgress(npc.Combat.AttackTick, game.AttackAnimationDuration),
 			HitProg:    combatProgress(npc.Combat.HitTick, game.HitAnimationDuration),
@@ -75,11 +76,20 @@ func (g *Game) syncEntities() {
 	for _, item := range g.client.NearbyItems {
 		g.mapRenderer.Items = append(g.mapRenderer.Items, render.ItemEntity{
 			UID:       item.UID,
-			GraphicID: item.GraphicID,
+			GraphicID: g.groundItemGraphicID(item),
 			X:         item.X,
 			Y:         item.Y,
 		})
 	}
+}
+
+func (g *Game) groundItemGraphicID(item game.NearbyItem) int {
+	if g.itemDB != nil {
+		if graphicID := g.itemDB.GraphicResourceID(item.ID, item.Amount); graphicID > 0 {
+			return graphicID
+		}
+	}
+	return item.GraphicID
 }
 
 // characterFrame picks the correct animation frame based on direction and walk state.

@@ -111,14 +111,13 @@ func (g *Game) sendChat(msg string) {
 }
 
 func (g *Game) drawChat(screen *ebiten.Image, theme clientui.Theme) {
-	panelRect := image.Rect(10, screenHeight-150, 392, screenHeight-10)
-	clientui.DrawPanel(screen, panelRect, theme, clientui.PanelOptions{Title: "Chat", Accent: theme.AccentMuted})
-
-	inputRect := image.Rect(panelRect.Min.X+12, panelRect.Max.Y-36, panelRect.Max.X-12, panelRect.Max.Y-12)
+	panelRect, inputRect := g.chatRects()
+	clientui.DrawPanel(screen, panelRect, theme, clientui.PanelOptions{Accent: theme.AccentMuted})
 	clientui.DrawInset(screen, inputRect, theme, g.chat.Typing)
 
+	historyTop := panelRect.Min.Y + 10
 	historyWidth := inputRect.Dx() - 4
-	maxHistoryLines := max(1, (inputRect.Min.Y-(panelRect.Min.Y+24))/14)
+	maxHistoryLines := max(0, (inputRect.Min.Y-historyTop)/14)
 	wrappedHistory := make([]string, 0, len(g.chat.History))
 	for _, msg := range g.chat.History {
 		wrappedHistory = append(wrappedHistory, wrapChatLines(msg, historyWidth)...)
@@ -127,13 +126,13 @@ func (g *Game) drawChat(screen *ebiten.Image, theme clientui.Theme) {
 		wrappedHistory = wrappedHistory[len(wrappedHistory)-maxHistoryLines:]
 	}
 
-	y := inputRect.Min.Y - 10
-	for i := len(wrappedHistory) - 1; i >= 0 && y > panelRect.Min.Y+18; i-- {
+	y := inputRect.Min.Y - 8
+	for i := len(wrappedHistory) - 1; i >= 0 && y > historyTop; i-- {
 		clientui.DrawText(screen, wrappedHistory[i], panelRect.Min.X+14, y, theme.Text)
 		y -= 14
 	}
 
-	inputText := "Press Enter to speak"
+	inputText := "Press Enter"
 	inputColor := theme.TextDim
 	if g.chat.Typing {
 		inputText = "> " + g.chat.Input
@@ -141,9 +140,24 @@ func (g *Game) drawChat(screen *ebiten.Image, theme clientui.Theme) {
 			inputText += "_"
 		}
 		inputColor = theme.Text
+	} else if len(g.chat.History) > 0 {
+		inputText = "Reply"
 	}
 	inputText = trimChatLineLeft(inputText, inputRect.Dx()-20)
 	clientui.DrawText(screen, inputText, inputRect.Min.X+10, inputRect.Min.Y+16, inputColor)
+}
+
+func (g *Game) chatRects() (image.Rectangle, image.Rectangle) {
+	if g.chat.Typing {
+		panelRect := image.Rect(10, g.screenH-128, 372, g.screenH-10)
+		return panelRect, image.Rect(panelRect.Min.X+12, panelRect.Max.Y-36, panelRect.Max.X-12, panelRect.Max.Y-12)
+	}
+	if len(g.chat.History) > 0 {
+		panelRect := image.Rect(10, g.screenH-102, 360, g.screenH-10)
+		return panelRect, image.Rect(panelRect.Min.X+12, panelRect.Max.Y-34, panelRect.Max.X-12, panelRect.Max.Y-12)
+	}
+	panelRect := image.Rect(10, g.screenH-44, 260, g.screenH-10)
+	return panelRect, image.Rect(panelRect.Min.X+12, panelRect.Min.Y+10, panelRect.Max.X-12, panelRect.Max.Y-12)
 }
 
 func wrapChatLines(text string, maxWidth int) []string {

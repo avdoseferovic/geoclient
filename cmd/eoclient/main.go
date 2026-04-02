@@ -14,32 +14,57 @@ import (
 	"github.com/avdo/eoweb/internal/game"
 	"github.com/avdo/eoweb/internal/gfx"
 	eonet "github.com/avdo/eoweb/internal/net"
+	"github.com/avdo/eoweb/internal/pubdata"
 	"github.com/avdo/eoweb/internal/render"
 )
 
 const (
-	screenWidth  = 640
-	screenHeight = 480
-	serverAddr   = "ws://127.0.0.1:8078"
-	gfxDir       = "gfx"
-	mapsDir      = "maps"
+	defaultWidth  = 640
+	defaultHeight = 480
+	serverAddr    = "ws://127.0.0.1:8078"
+	gfxDir        = "gfx"
+	mapsDir       = "maps"
+	itemPubPath   = "pub/dat001.eif"
+	npcPubPath    = "pub/dtn001.enf"
+	layoutPath    = "inventory-layout.json"
 )
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
 	loader := gfx.NewLoader(gfxDir)
+	itemDB, err := pubdata.LoadItemDB(itemPubPath)
+	if err != nil {
+		slog.Warn("item metadata unavailable", "path", itemPubPath, "err", err)
+	}
+	npcDB, err := pubdata.LoadNPCDB(npcPubPath)
+	if err != nil {
+		slog.Warn("npc metadata unavailable", "path", npcPubPath, "err", err)
+	}
+	inventoryLayout, err := loadInventoryLayout(layoutPath)
+	if err != nil {
+		slog.Warn("inventory layout unavailable", "path", layoutPath, "err", err)
+		inventoryLayout = make(map[int]storedInventoryPos)
+	}
 	g := &Game{
-		client:       game.NewClient(),
-		handlers:     game.NewHandlerRegistry(),
-		gfxLoad:      loader,
-		mapRenderer:  render.NewMapRenderer(loader),
-		overlay:      newOverlayState(),
-		connectArmed: true,
+		screenW:             defaultWidth,
+		screenH:             defaultHeight,
+		client:              game.NewClient(),
+		handlers:            game.NewHandlerRegistry(),
+		gfxLoad:             loader,
+		itemDB:              itemDB,
+		npcDB:               npcDB,
+		inventoryLayout:     inventoryLayout,
+		inventoryLayoutPath: layoutPath,
+		mapRenderer:         render.NewMapRenderer(loader),
+		overlay:             newOverlayState(),
+		connectArmed:        true,
 	}
 	game.RegisterAllHandlers(g.handlers)
 
-	ebiten.SetWindowSize(screenWidth, screenHeight)
+	ebiten.SetWindowSize(defaultWidth, defaultHeight)
+	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
+	ebiten.SetWindowSizeLimits(defaultWidth, defaultHeight, -1, -1)
 	ebiten.SetWindowTitle("EO Client")
 	ebiten.SetTPS(60)
 
@@ -50,12 +75,19 @@ func main() {
 }
 
 type Game struct {
-	client      *game.Client
-	handlers    *game.HandlerRegistry
-	gfxLoad     *gfx.Loader
-	mapRenderer *render.MapRenderer
-	overlay     overlayState
-	autoWalk    autoWalkPlan
+	screenW             int
+	screenH             int
+	client              *game.Client
+	handlers            *game.HandlerRegistry
+	gfxLoad             *gfx.Loader
+	itemDB              *pubdata.ItemDB
+	npcDB               *pubdata.NPCDB
+	inventoryLayout     map[int]storedInventoryPos
+	inventoryLayoutPath string
+	inventoryDrag       inventoryDragState
+	mapRenderer         *render.MapRenderer
+	overlay             overlayState
+	autoWalk            autoWalkPlan
 
 	connected    bool
 	connectArmed bool
@@ -69,6 +101,8 @@ type Game struct {
 	attackCooldown int
 	facingDir      int  // current facing direction (0-3)
 	isWalking      bool // true while local player walk animation is playing
+	moveHoldDir    int
+	moveHoldTicks  int
 }
 
 type worldHoverIntent struct {
@@ -124,7 +158,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
-	return screenWidth, screenHeight
+	g.screenW = outsideWidth
+	g.screenH = outsideHeight
+	return outsideWidth, outsideHeight
 }
 
 func (g *Game) connect() {
@@ -225,6 +261,10 @@ func (g *Game) handleEvent(evt game.Event) {
 	}
 }
 
+const faceCooldownTicks = 3 // Matches eoweb's 1 face tick at 20 TPS.
+const walkStartCooldownTicks = 24
+const attackCooldownTicks = 30
+
 // walkAnimDuration must match game.WalkDuration for consistent timing.
 
 func (g *Game) updateInGame() {
@@ -244,6 +284,12 @@ func (g *Game) updateInGame() {
 	if g.attackCooldown > 0 {
 		g.attackCooldown--
 	}
+	if g.inventoryDrag.Active {
+		if inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
+			g.finishInventoryDrag()
+		}
+		return
+	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		if g.overlay.activeMenuPanel != gameMenuPanelNone {
 			g.overlay.activeMenuPanel = gameMenuPanelNone
@@ -261,7 +307,7 @@ func (g *Game) updateInGame() {
 		g.clearAutoWalk()
 		if g.attackCooldown <= 0 {
 			g.sendAttack()
-			g.attackCooldown = 18
+			g.attackCooldown = attackCooldownTicks
 		}
 		return
 	}
@@ -277,6 +323,7 @@ func (g *Game) updateInGame() {
 	} else if ebiten.IsKeyPressed(ebiten.KeyArrowRight) {
 		dir = 3 // Right
 	}
+	g.updateMoveHold(dir)
 
 	if dir >= 0 {
 		g.clearAutoWalk()
@@ -365,7 +412,7 @@ func (g *Game) faceOnly(dir int) bool {
 	}
 	g.facingDir = dir
 	g.sendFace(dir)
-	g.walkCooldown = 8
+	g.walkCooldown = faceCooldownTicks
 	return true
 }
 
@@ -374,7 +421,7 @@ func (g *Game) stepToward(dir int) bool {
 		return false
 	}
 	nextX, nextY := nextTileInDirection(g.client.Character.X, g.client.Character.Y, dir)
-	if !g.canStepTo(nextX, nextY) {
+	if !g.canArrowStepTo(nextX, nextY, dir) {
 		return g.faceOnly(dir)
 	}
 	if g.facingDir != dir {
@@ -388,12 +435,12 @@ func (g *Game) walkImmediately(dir int) bool {
 		return false
 	}
 	nextX, nextY := nextTileInDirection(g.client.Character.X, g.client.Character.Y, dir)
-	if !g.canStepTo(nextX, nextY) {
+	if !g.canArrowStepTo(nextX, nextY, dir) {
 		return false
 	}
 	g.facingDir = dir
 	g.startLocalWalk(dir)
-	g.walkCooldown = game.WalkDuration
+	g.walkCooldown = walkStartCooldownTicks
 	return true
 }
 
@@ -408,7 +455,7 @@ func (g *Game) faceOrAttack(dir int) bool {
 		return true
 	}
 	g.sendAttack()
-	g.attackCooldown = 18
+	g.attackCooldown = attackCooldownTicks
 	return true
 }
 
@@ -481,13 +528,13 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 	g.mapRenderer.CamOffY = woy
 
 	g.syncEntities()
-	g.mapRenderer.Draw(screen)
-
-	// Tile cursor
-	camSX, camSY := render.IsoToScreen(g.mapRenderer.CamX, g.mapRenderer.CamY)
-	camSX += wox
-	camSY += woy
-	g.drawCursor(screen, camSX, camSY)
+	g.mapRenderer.DrawWithMid(screen, func() {
+		// Tile cursor renders below actors so characters/NPCs can naturally cover it.
+		camSX, camSY := render.IsoToScreen(g.mapRenderer.CamX, g.mapRenderer.CamY)
+		camSX += wox
+		camSY += woy
+		g.drawCursor(screen, camSX, camSY)
+	})
 }
 
 func (g *Game) drawCursor(screen *ebiten.Image, camSX, camSY float64) {
@@ -496,8 +543,8 @@ func (g *Game) drawCursor(screen *ebiten.Image, camSX, camSY float64) {
 		return // wall/edge — no cursor
 	}
 
-	halfW := float64(screenWidth) / 2
-	halfH := float64(screenHeight) / 2
+	halfW := float64(g.screenW) / 2
+	halfH := float64(g.screenH) / 2
 	sx, sy := render.IsoToScreen(float64(hover.TileX), float64(hover.TileY))
 	sx = sx - camSX + halfW
 	sy = sy - camSY + halfH
@@ -548,8 +595,95 @@ func (g *Game) canStepTo(tileX, tileY int) bool {
 	if !g.isMapTileInBounds(tileX, tileY) {
 		return false
 	}
-	switch g.getCursorType(tileX, tileY) {
-	case 0, 2:
+	return g.stepBlockerAt(tileX, tileY) == stepBlockerNone
+}
+
+type stepBlocker int
+
+const (
+	stepBlockerNone stepBlocker = iota
+	stepBlockerTile
+	stepBlockerNPC
+	stepBlockerPlayer
+)
+
+const playerGhostHoldTicks = 24
+
+func (g *Game) canArrowStepTo(tileX, tileY, dir int) bool {
+	switch g.stepBlockerAt(tileX, tileY) {
+	case stepBlockerNone:
+		return true
+	case stepBlockerPlayer:
+		return g.playerPassThroughAllowed(dir)
+	default:
+		return false
+	}
+}
+
+func (g *Game) playerPassThroughAllowed(dir int) bool {
+	return dir >= 0 && g.moveHoldDir == dir && g.moveHoldTicks >= playerGhostHoldTicks
+}
+
+func (g *Game) updateMoveHold(dir int) {
+	if dir < 0 {
+		g.moveHoldDir = -1
+		g.moveHoldTicks = 0
+		return
+	}
+	if g.moveHoldDir != dir {
+		g.moveHoldDir = dir
+		g.moveHoldTicks = 1
+		return
+	}
+	g.moveHoldTicks++
+}
+
+func (g *Game) stepBlockerAt(tileX, tileY int) stepBlocker {
+	if !g.isMapTileInBounds(tileX, tileY) {
+		return stepBlockerTile
+	}
+	if blockedTileSpec(g.tileSpecAt(tileX, tileY)) {
+		return stepBlockerTile
+	}
+	for _, npc := range g.client.NearbyNpcs {
+		if npc.Dead || npc.Hidden {
+			continue
+		}
+		if npc.X == tileX && npc.Y == tileY {
+			return stepBlockerNPC
+		}
+	}
+	for _, ch := range g.client.NearbyChars {
+		if ch.PlayerID == g.client.PlayerID {
+			continue
+		}
+		if ch.X == tileX && ch.Y == tileY {
+			return stepBlockerPlayer
+		}
+	}
+	return stepBlockerNone
+}
+
+func (g *Game) tileSpecAt(tileX, tileY int) int {
+	if g.mapRenderer.Map == nil {
+		return 0
+	}
+	for _, row := range g.mapRenderer.Map.TileSpecRows {
+		if row.Y != tileY {
+			continue
+		}
+		for _, tile := range row.Tiles {
+			if tile.X == tileX {
+				return int(tile.TileSpec)
+			}
+		}
+	}
+	return 0
+}
+
+func blockedTileSpec(spec int) bool {
+	switch spec {
+	case 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26:
 		return true
 	default:
 		return false
@@ -622,26 +756,12 @@ func absInt(value int) int {
 
 func (g *Game) getCursorType(tileX, tileY int) int {
 	// Check if wall/edge tile — hide cursor
-	if g.mapRenderer.Map != nil {
-		for _, row := range g.mapRenderer.Map.TileSpecRows {
-			if row.Y != tileY {
-				continue
-			}
-			for _, tile := range row.Tiles {
-				if tile.X == tileX {
-					spec := tile.TileSpec
-					// MapTileSpec_Wall=1, MapTileSpec_Edge=16
-					if spec == 1 || spec == 16 {
-						return -1
-					}
-					// Interactive tiles (chairs, chests, boards, etc.)
-					switch spec {
-					case 4, 5, 6, 7, 8, 9, 10, 11, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26:
-						return 1
-					}
-				}
-			}
-		}
+	spec := g.tileSpecAt(tileX, tileY)
+	if spec == 1 || spec == 16 {
+		return -1
+	}
+	if blockedTileSpec(spec) {
+		return 1
 	}
 
 	// Check for character or NPC at this tile
