@@ -2,9 +2,9 @@ package pubdata
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
+	"github.com/avdo/eoweb/internal/assets"
 	"github.com/ethanmoffat/eolib-go/v3/data"
 	"github.com/ethanmoffat/eolib-go/v3/protocol/pub"
 )
@@ -45,11 +45,18 @@ type ItemDB struct {
 }
 
 func LoadItemDB(path string) (*ItemDB, error) {
-	raw, err := os.ReadFile(path)
+	return LoadItemDBFromReader(assets.NewOSReader(), path)
+}
+
+func LoadItemDBFromReader(reader assets.Reader, path string) (*ItemDB, error) {
+	raw, err := reader.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read EIF: %w", err)
 	}
+	return LoadItemDBFromBytes(raw)
+}
 
+func LoadItemDBFromBytes(raw []byte) (*ItemDB, error) {
 	reader := data.NewEoReader(raw)
 	var eif pub.Eif
 	if err := eif.Deserialize(reader); err != nil {

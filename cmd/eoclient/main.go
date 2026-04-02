@@ -18,54 +18,47 @@ import (
 	"github.com/avdo/eoweb/internal/render"
 )
 
-const (
-	defaultWidth  = 640
-	defaultHeight = 480
-	serverAddr    = "ws://127.0.0.1:8078"
-	gfxDir        = "gfx"
-	mapsDir       = "maps"
-	itemPubPath   = "pub/dat001.eif"
-	npcPubPath    = "pub/dtn001.enf"
-	layoutPath    = "inventory-layout.json"
-)
-
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
-	loader := gfx.NewLoader(gfxDir)
-	itemDB, err := pubdata.LoadItemDB(itemPubPath)
+	cfg := loadRuntimeConfig()
+
+	loader := gfx.NewLoaderWithReader(cfg.gfxDir, cfg.assetReader)
+	itemDB, err := pubdata.LoadItemDBFromReader(cfg.assetReader, cfg.itemPubPath)
 	if err != nil {
-		slog.Warn("item metadata unavailable", "path", itemPubPath, "err", err)
+		slog.Warn("item metadata unavailable", "path", cfg.itemPubPath, "err", err)
 	}
-	npcDB, err := pubdata.LoadNPCDB(npcPubPath)
+	npcDB, err := pubdata.LoadNPCDBFromReader(cfg.assetReader, cfg.npcPubPath)
 	if err != nil {
-		slog.Warn("npc metadata unavailable", "path", npcPubPath, "err", err)
+		slog.Warn("npc metadata unavailable", "path", cfg.npcPubPath, "err", err)
 	}
-	inventoryLayout, err := loadInventoryLayout(layoutPath)
+	inventoryLayout, err := loadInventoryLayout(cfg.layoutPath)
 	if err != nil {
-		slog.Warn("inventory layout unavailable", "path", layoutPath, "err", err)
+		slog.Warn("inventory layout unavailable", "path", cfg.layoutPath, "err", err)
 		inventoryLayout = make(map[int]storedInventoryPos)
 	}
 	g := &Game{
-		screenW:             defaultWidth,
-		screenH:             defaultHeight,
+		screenW:             cfg.defaultWidth,
+		screenH:             cfg.defaultHeight,
 		client:              game.NewClient(),
 		handlers:            game.NewHandlerRegistry(),
 		gfxLoad:             loader,
 		itemDB:              itemDB,
 		npcDB:               npcDB,
 		inventoryLayout:     inventoryLayout,
-		inventoryLayoutPath: layoutPath,
-		mapRenderer:         render.NewMapRenderer(loader),
+		inventoryLayoutPath: cfg.layoutPath,
+		mapsDir:             cfg.mapsDir,
+		mapRenderer:         render.NewMapRendererWithReader(loader, cfg.assetReader),
 		overlay:             newOverlayState(),
 		connectArmed:        true,
+		serverAddr:          cfg.serverAddr,
 	}
 	game.RegisterAllHandlers(g.handlers)
 
-	ebiten.SetWindowSize(defaultWidth, defaultHeight)
+	ebiten.SetWindowSize(cfg.defaultWidth, cfg.defaultHeight)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
-	ebiten.SetWindowSizeLimits(defaultWidth, defaultHeight, -1, -1)
-	ebiten.SetWindowTitle("EO Client")
+	ebiten.SetWindowSizeLimits(cfg.defaultWidth, cfg.defaultHeight, -1, -1)
+	ebiten.SetWindowTitle(cfg.windowTitle)
 	ebiten.SetTPS(60)
 
 	if err := ebiten.RunGame(g); err != nil {
@@ -84,10 +77,12 @@ type Game struct {
 	npcDB               *pubdata.NPCDB
 	inventoryLayout     map[int]storedInventoryPos
 	inventoryLayoutPath string
+	mapsDir             string
 	inventoryDrag       inventoryDragState
 	mapRenderer         *render.MapRenderer
 	overlay             overlayState
 	autoWalk            autoWalkPlan
+	serverAddr          string
 
 	connected    bool
 	connectArmed bool
@@ -164,8 +159,8 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 }
 
 func (g *Game) connect() {
-	slog.Info("connecting", "addr", serverAddr)
-	conn, err := eonet.Dial(serverAddr)
+	slog.Info("connecting", "addr", g.serverAddr)
+	conn, err := eonet.Dial(g.serverAddr)
 	if err != nil {
 		g.failConnection(fmt.Sprintf("Unable to reach server: %v", err), false)
 		return
@@ -502,7 +497,7 @@ func (g *Game) tickAnimations() {
 }
 
 func (g *Game) loadCurrentMap() {
-	mapPath := fmt.Sprintf("%s/%05d.emf", mapsDir, g.client.Character.MapID)
+	mapPath := fmt.Sprintf("%s/%05d.emf", g.mapsDir, g.client.Character.MapID)
 	if err := g.mapRenderer.LoadMap(mapPath); err != nil {
 		slog.Error("failed to load map", "path", mapPath, "err", err)
 	}

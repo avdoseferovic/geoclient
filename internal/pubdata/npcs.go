@@ -2,8 +2,8 @@ package pubdata
 
 import (
 	"fmt"
-	"os"
 
+	"github.com/avdo/eoweb/internal/assets"
 	"github.com/ethanmoffat/eolib-go/v3/data"
 	"github.com/ethanmoffat/eolib-go/v3/protocol/pub"
 )
@@ -18,11 +18,18 @@ type NPCDB struct {
 }
 
 func LoadNPCDB(path string) (*NPCDB, error) {
-	raw, err := os.ReadFile(path)
+	return LoadNPCDBFromReader(assets.NewOSReader(), path)
+}
+
+func LoadNPCDBFromReader(reader assets.Reader, path string) (*NPCDB, error) {
+	raw, err := reader.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read ENF: %w", err)
 	}
+	return LoadNPCDBFromBytes(raw)
+}
 
+func LoadNPCDBFromBytes(raw []byte) (*NPCDB, error) {
 	reader := data.NewEoReader(raw)
 	var enf pub.Enf
 	if err := enf.Deserialize(reader); err != nil {

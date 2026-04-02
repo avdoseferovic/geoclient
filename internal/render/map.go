@@ -2,13 +2,14 @@ package render
 
 import (
 	"math"
-	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/ethanmoffat/eolib-go/v3/data"
 	eomap "github.com/ethanmoffat/eolib-go/v3/protocol/map"
 	"github.com/hajimehoshi/ebiten/v2"
 
+	"github.com/avdo/eoweb/internal/assets"
 	"github.com/avdo/eoweb/internal/gfx"
 )
 
@@ -28,6 +29,7 @@ var layerGfxIDs = [9]int{3, GfxMapObjects, 5, 6, 6, 7, 3, 22, 5}
 type MapRenderer struct {
 	Map    *eomap.Emf
 	Loader *gfx.Loader
+	Reader assets.Reader
 
 	// Camera position in isometric coordinates
 	CamX, CamY float64
@@ -42,12 +44,16 @@ type MapRenderer struct {
 }
 
 func NewMapRenderer(loader *gfx.Loader) *MapRenderer {
-	return &MapRenderer{Loader: loader}
+	return NewMapRendererWithReader(loader, assets.NewOSReader())
+}
+
+func NewMapRendererWithReader(loader *gfx.Loader, reader assets.Reader) *MapRenderer {
+	return &MapRenderer{Loader: loader, Reader: reader}
 }
 
 // LoadMap reads and parses an EMF file.
 func (r *MapRenderer) LoadMap(path string) error {
-	fileData, err := os.ReadFile(path)
+	fileData, err := r.Reader.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return err
 	}

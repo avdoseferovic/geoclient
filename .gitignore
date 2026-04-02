@@ -9,3 +9,9 @@
 # OS
 .DS_Store
 .gocache
+
+# Local build outputs
+/eoclient
+/webclient
+/web/eoclient.wasm
+/web/wasm_exec.js

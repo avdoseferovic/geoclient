@@ -3,9 +3,10 @@ package gfx
 import (
 	"fmt"
 	"image"
-	"os"
+	"path/filepath"
 	"sync"
 
+	"github.com/avdo/eoweb/internal/assets"
 	ebimg "github.com/hajimehoshi/ebiten/v2"
 )
 
@@ -14,6 +15,7 @@ const lruMaxSize = 500
 // Loader loads and caches sprites from EGF files.
 type Loader struct {
 	dataDir string
+	reader  assets.Reader
 
 	mu   sync.Mutex
 	egfs map[int]*PEReader
@@ -25,8 +27,13 @@ type Loader struct {
 
 // NewLoader creates a GFX loader that reads .egf files from dataDir.
 func NewLoader(dataDir string) *Loader {
+	return NewLoaderWithReader(dataDir, assets.NewOSReader())
+}
+
+func NewLoaderWithReader(dataDir string, reader assets.Reader) *Loader {
 	return &Loader{
 		dataDir: dataDir,
+		reader:  reader,
 		egfs:    make(map[int]*PEReader),
 		cache:   make(map[string]*ebimg.Image),
 	}
@@ -41,8 +48,8 @@ func (l *Loader) LoadEGF(fileID int) error {
 		return nil
 	}
 
-	path := fmt.Sprintf("%s/gfx%03d.egf", l.dataDir, fileID)
-	data, err := os.ReadFile(path)
+	path := filepath.Join(l.dataDir, fmt.Sprintf("gfx%03d.egf", fileID))
+	data, err := l.reader.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read egf %d: %w", fileID, err)
 	}
