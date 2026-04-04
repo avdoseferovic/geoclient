@@ -25,8 +25,8 @@ func (g *Game) drawMinimap(screen *ebiten.Image, theme clientui.Theme, rect imag
 	centerX, centerY := g.minimapCenter(snapshot)
 	halfCols := cols / 2
 	halfRows := rows / 2
-	for row := 0; row < rows; row++ {
-		for col := 0; col < cols; col++ {
+	for row := range rows {
+		for col := range cols {
 			tileX := int(centerX) + col - halfCols
 			tileY := int(centerY) + row - halfRows
 			fill := hud.MinimapTileColor(g.tileStateAt(tileX, tileY), theme)

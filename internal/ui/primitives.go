@@ -84,7 +84,7 @@ func DrawBackdrop(screen *ebiten.Image, theme Theme, ticks int) {
 	}
 
 	bandX := float64((ticks*2)%(b.Dx()+160) - 160)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		x := bandX - float64(i*54)
 		fillRect(screen, x, 0, 18, float64(b.Dy()), color.NRGBA{R: theme.Accent.R, G: theme.Accent.G, B: theme.Accent.B, A: 16})
 	}

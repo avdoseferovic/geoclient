@@ -256,10 +256,7 @@ func (c *NearbyCharacter) WalkProgress() float64 {
 // WalkFrame returns the current walk animation frame (0-3).
 func (c *NearbyCharacter) WalkFrame() int {
 	ticksPerFrame := WalkDuration / 4
-	frame := c.WalkTick / ticksPerFrame
-	if frame > 3 {
-		frame = 3
-	}
+	frame := min(c.WalkTick/ticksPerFrame, 3)
 	return frame
 }
 
@@ -364,10 +361,7 @@ func (n *NearbyNPC) WalkProgress() float64 {
 
 func (n *NearbyNPC) WalkFrame() int {
 	ticksPerFrame := NpcWalkDuration / 4
-	frame := n.WalkTick / ticksPerFrame
-	if frame > 3 {
-		frame = 3
-	}
+	frame := min(n.WalkTick/ticksPerFrame, 3)
 	return frame
 }
 

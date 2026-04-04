@@ -127,7 +127,7 @@ func decodePaletted(data []byte, pixelStart, stride, w, h, depth int, topDown bo
 	pixelsPerByte := 8 / depth
 	mask := (1 << depth) - 1
 
-	for row := 0; row < h; row++ {
+	for row := range h {
 		line := row
 		if !topDown {
 			line = h - 1 - row
@@ -175,14 +175,14 @@ func decodeRGB(data []byte, pixelStart, stride, w, h, depth int, topDown bool, h
 	gShift, gLen := maskShiftLen(gMask)
 	bShift, bLen := maskShiftLen(bMask)
 
-	for row := 0; row < h; row++ {
+	for row := range h {
 		line := row
 		if !topDown {
 			line = h - 1 - row
 		}
 		lineStart := pixelStart + stride*line
 
-		for x := 0; x < w; x++ {
+		for x := range w {
 			pos := lineStart + x*bytesPerPixel
 			if pos+bytesPerPixel > len(data) {
 				break
@@ -255,7 +255,7 @@ func decodeRLE8(data []byte, pixelStart, w, h int, topDown bool, palette []color
 			}
 		} else {
 			idx := int(value)
-			for i := 0; i < count; i++ {
+			for range count {
 				if idx < len(palette) && x < w && y < h {
 					img.SetNRGBA(x, getRow(y), palette[idx])
 				}

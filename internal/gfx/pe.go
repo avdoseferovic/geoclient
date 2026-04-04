@@ -96,7 +96,7 @@ func (p *PEReader) readHeader() error {
 
 	// Section headers start after optional header
 	secOff := optOff + optHeaderSize
-	for i := 0; i < numSections; i++ {
+	for i := range numSections {
 		off := secOff + i*40
 		if off+40 > len(p.data) {
 			break
@@ -205,9 +205,6 @@ func (p *PEReader) readBitmapTable() error {
 
 // ResourceData returns the raw bytes of a resource.
 func (p *PEReader) ResourceData(info ResourceInfo) []byte {
-	end := info.Start + info.Size
-	if end > len(p.data) {
-		end = len(p.data)
-	}
+	end := min(info.Start+info.Size, len(p.data))
 	return p.data[info.Start:end]
 }

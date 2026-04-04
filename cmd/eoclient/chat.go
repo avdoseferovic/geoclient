@@ -348,13 +348,7 @@ func (g *Game) setChatScrollFromScrollbar(mouseY int, historyRect, inputRect ima
 	}
 	thumbH := thumbRect.Dy()
 	maxThumbTravel := max(1, trackRect.Dy()-thumbH)
-	thumbTop := mouseY - dragOffsetY
-	if thumbTop < trackRect.Min.Y {
-		thumbTop = trackRect.Min.Y
-	}
-	if thumbTop > trackRect.Max.Y-thumbH {
-		thumbTop = trackRect.Max.Y - thumbH
-	}
+	thumbTop := min(max(mouseY-dragOffsetY, trackRect.Min.Y), trackRect.Max.Y-thumbH)
 	ratio := float64(thumbTop-trackRect.Min.Y) / float64(maxThumbTravel)
 	scroll := clampChatScroll((1-ratio)*maxScroll, maxScroll)
 	g.chat.ScrollTarget[g.chat.ActiveChannel] = scroll

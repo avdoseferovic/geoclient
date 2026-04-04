@@ -79,7 +79,7 @@ func (g *Game) queueAutoWalkToTile(tileX, tileY int) bool {
 
 func (g *Game) queueAutoWalkToInteraction(tileX, tileY int) bool {
 	goals := make([]movement.TileCoord, 0, 4)
-	for dir := 0; dir < 4; dir++ {
+	for dir := range 4 {
 		nextX, nextY := movement.NextTileInDirection(tileX, tileY, dir)
 		if !g.canStepTo(nextX, nextY) {
 			continue

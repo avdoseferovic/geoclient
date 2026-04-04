@@ -5,7 +5,7 @@ import "testing"
 func TestNearbyCharacterWalkDurationMatchesReferenceTiming(t *testing.T) {
 	ch := NearbyCharacter{Walking: true}
 
-	for i := 0; i < WalkDuration-1; i++ {
+	for i := range WalkDuration - 1 {
 		if done := ch.TickWalk(); done {
 			t.Fatalf("walk completed early at tick %d", i+1)
 		}

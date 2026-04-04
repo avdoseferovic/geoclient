@@ -75,7 +75,7 @@ func DotPulse(prefix string, ticks int) string {
 func DrawPulseBar(screen *ebiten.Image, rect image.Rectangle, theme clientui.Theme, ticks int) {
 	clientui.DrawInset(screen, rect, theme, false)
 	segmentW := 12
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		alpha := uint8(50)
 		if i == (ticks/12)%5 {
 			alpha = 180
@@ -110,13 +110,7 @@ func TnlProgress(level, experience int) (remaining int, rangeValue int) {
 		return 0, 1
 	}
 	progressRange := nextLevelExp - currentLevelExp
-	remaining = nextLevelExp - experience
-	if remaining < 0 {
-		remaining = 0
-	}
-	if remaining > progressRange {
-		remaining = progressRange
-	}
+	remaining = min(max(nextLevelExp-experience, 0), progressRange)
 	return remaining, progressRange
 }
 

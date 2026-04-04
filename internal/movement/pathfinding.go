@@ -140,13 +140,7 @@ func AutoWalkVisitLimit(mapWidth, mapHeight int, start TileCoord, goals []TileCo
 	detourMargin := max(12, nearestGoalDistance/2)
 	searchWidth := maxX - minX + 1 + detourMargin*2
 	searchHeight := maxY - minY + 1 + detourMargin*2
-	searchArea := searchWidth * searchHeight
-	if searchArea < 2_048 {
-		searchArea = 2_048
-	}
-	if searchArea > MaxAutoWalkVisitedTiles {
-		searchArea = MaxAutoWalkVisitedTiles
-	}
+	searchArea := min(max(searchWidth*searchHeight, 2_048), MaxAutoWalkVisitedTiles)
 	if searchArea > mapTiles {
 		return mapTiles
 	}
