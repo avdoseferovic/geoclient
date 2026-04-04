@@ -50,6 +50,14 @@ func (g *Game) handleInGameOverlayClick() bool {
 }
 
 func (g *Game) handleHUDPanelClick(rect image.Rectangle, mx, my int) bool {
+	// Party panel: handle Leave button
+	if g.overlay.activeMenuPanel == overlay.MenuPanelParty {
+		leaveRect := image.Rect(rect.Min.X+12, rect.Max.Y-32, rect.Min.X+72, rect.Max.Y-14)
+		if overlay.PointInRect(mx, my, leaveRect) {
+			g.sendPartyRemove(g.client.PlayerID)
+		}
+		return true
+	}
 	if g.overlay.activeMenuPanel != overlay.MenuPanelInventory {
 		return true
 	}
@@ -249,12 +257,38 @@ func (g *Game) finishInventoryDrag() {
 		return
 	}
 	defer func() { g.inventoryDrag = inventoryDragState{} }()
+
+	mx, my := ebiten.CursorPosition()
+
+	// Drop onto chest dialog → deposit item
+	if g.overlay.chestDialogOpen {
+		chestRect := g.chestDialogRect()
+		if overlay.PointInRect(mx, my, chestRect) {
+			item := g.findInventoryItem(g.inventoryDrag.ItemID)
+			if item != nil && item.Amount > 0 {
+				g.sendChestAdd(g.overlay.chestX, g.overlay.chestY, item.ID, item.Amount)
+			}
+			return
+		}
+	}
+
+	// Drop onto trade dialog → offer item
+	if g.overlay.tradeDialogOpen {
+		tradeRect := g.tradeDialogRect()
+		if overlay.PointInRect(mx, my, tradeRect) {
+			item := g.findInventoryItem(g.inventoryDrag.ItemID)
+			if item != nil && item.Amount > 0 {
+				g.sendTradeAdd(item.ID, item.Amount)
+			}
+			return
+		}
+	}
+
 	layout := overlay.InGameHUDLayout(g.screenW, g.screenH)
 	panelRect := layout.MenuPanelRect
 	if g.overlay.activeMenuPanel != overlay.MenuPanelInventory {
 		return
 	}
-	mx, my := ebiten.CursorPosition()
 	for i, tabRect := range hud.PageTabRects(panelRect) {
 		if overlay.PointInRect(mx, my, tabRect) {
 			g.overlay.inventoryPage = i

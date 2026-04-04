@@ -49,9 +49,13 @@ func AbsInt(value int) int {
 }
 
 // BlockedTileSpec returns true if the tile spec value represents a non-walkable tile.
+// Spec values follow the EO MapTileSpec enum:
+//
+//	0=Wall, 1-7=Chairs, 9=Chest, 16=BankVault, 17=NpcBoundary,
+//	18=Edge, 19=FakeWall (walkable!), 20-27=Boards, 28=Jukebox
 func BlockedTileSpec(spec int) bool {
 	switch spec {
-	case 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 16, 18, 19, 20, 21, 22, 23, 24, 25, 26:
+	case 0, 1, 2, 3, 4, 5, 6, 7, 9, 16, 18, 20, 21, 22, 23, 24, 25, 26, 27, 28:
 		return true
 	default:
 		return false

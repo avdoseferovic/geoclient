@@ -30,7 +30,7 @@ func (g *Game) drawChat(screen *ebiten.Image, theme clientui.Theme) {
 	g.chat.Scroll[g.chat.ActiveChannel] = scrollOffset
 	hiddenOlder := max(0.0, float64(max(0, len(wrappedHistory)-maxHistoryLines))-scrollOffset)
 
-	historyLayer := ebiten.NewImage(historyRect.Dx(), historyRect.Dy())
+	historyLayer := g.chatHistoryImage(historyRect.Dx(), historyRect.Dy())
 	chatColor := chatChannelTextColor(g.chat.ActiveChannel, theme)
 	y := inputRect.Min.Y - 12 + int(math.Round(scrollFraction*chatLineHeight))
 	for i := len(visibleHistory) - 1; i >= 0 && y > historyTop; i-- {
@@ -165,6 +165,17 @@ func wrapChatLines(text string, maxWidth int) []string {
 		return []string{""}
 	}
 	return trimmed
+}
+
+func (g *Game) chatHistoryImage(w, h int) *ebiten.Image {
+	if g.chatHistoryBuf == nil || g.chatHistoryW != w || g.chatHistoryH != h {
+		g.chatHistoryBuf = ebiten.NewImage(w, h)
+		g.chatHistoryW = w
+		g.chatHistoryH = h
+	} else {
+		g.chatHistoryBuf.Clear()
+	}
+	return g.chatHistoryBuf
 }
 
 func trimChatLineLeft(text string, maxWidth int) string {

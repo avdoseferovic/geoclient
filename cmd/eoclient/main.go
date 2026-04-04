@@ -97,7 +97,10 @@ type Game struct {
 	connectArmed bool
 	connectError string
 
-	chat ChatState
+	chat           ChatState
+	chatHistoryBuf *ebiten.Image
+	chatHistoryW   int
+	chatHistoryH   int
 
 	walkCooldown   int
 	attackCooldown int
@@ -115,6 +118,7 @@ type worldHoverIntent struct {
 }
 
 func (g *Game) Update() error {
+	g.client.InvalidateSnapshot()
 	g.updateOverlayState()
 
 	if !g.connected && g.connectArmed && g.client.GetState() == game.StateInitial && g.connectError == "" {
@@ -162,6 +166,11 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 
 func (g *Game) updateInGame() {
 	g.tickAnimations()
+
+	// Handle dialog input first (before movement/combat)
+	if g.updateDialogs() {
+		return
+	}
 
 	g.updateChat()
 	if g.chat.Typing {
@@ -276,6 +285,13 @@ func (g *Game) handleInGameLeftClick() bool {
 
 	if hover.CursorType == 1 {
 		if movement.IsAdjacentTile(g.client.Character.X, g.client.Character.Y, hover.TileX, hover.TileY) {
+			// Check if it's a chest tile (spec 9) — open it
+			if g.tileSpecAt(hover.TileX, hover.TileY) == 9 {
+				g.sendChestOpen(hover.TileX, hover.TileY)
+				g.overlay.chestX = hover.TileX
+				g.overlay.chestY = hover.TileY
+				return true
+			}
 			return g.faceOnly(dir)
 		}
 		return g.queueAutoWalkToInteraction(hover.TileX, hover.TileY)
@@ -321,11 +337,12 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 	if !hover.Valid || hover.CursorType < 0 {
 		g.mapRenderer.Cursor = nil
 	} else {
-		g.mapRenderer.Cursor = &render.CursorEntity{
+		g.mapRenderer.CursorBuf = render.CursorEntity{
 			X:    hover.TileX,
 			Y:    hover.TileY,
 			Type: hover.CursorType,
 		}
+		g.mapRenderer.Cursor = &g.mapRenderer.CursorBuf
 	}
 	g.mapRenderer.Draw(screen)
 }

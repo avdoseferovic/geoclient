@@ -31,17 +31,19 @@ type AutoWalkPlan struct {
 type CanStepFunc func(x, y int) bool
 
 // OrderedPathDirections returns directions sorted by greedy preference toward the goal.
-func OrderedPathDirections(from TileCoord, goal TileCoord) []int {
+func OrderedPathDirections(from TileCoord, goal TileCoord) [4]int {
 	primary, ok := DirectionTowardTile(from.X, from.Y, goal.X, goal.Y)
 	if !ok {
-		return []int{0, 1, 2, 3}
+		return [4]int{0, 1, 2, 3}
 	}
-	order := []int{primary}
-	for _, dir := range []int{0, 1, 2, 3} {
-		if dir == primary {
-			continue
+	var order [4]int
+	order[0] = primary
+	idx := 1
+	for _, dir := range [4]int{0, 1, 2, 3} {
+		if dir != primary {
+			order[idx] = dir
+			idx++
 		}
-		order = append(order, dir)
 	}
 	return order
 }

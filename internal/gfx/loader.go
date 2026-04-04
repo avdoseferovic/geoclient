@@ -1,6 +1,7 @@
 package gfx
 
 import (
+	"container/list"
 	"fmt"
 	"image"
 	"path/filepath"
@@ -12,6 +13,11 @@ import (
 
 const lruMaxSize = 500
 
+type cacheKey struct {
+	fileID     int
+	resourceID int
+}
+
 // Loader loads and caches sprites from EGF files.
 type Loader struct {
 	dataDir string
@@ -21,8 +27,9 @@ type Loader struct {
 	egfs map[int]*PEReader
 
 	cacheMu  sync.Mutex
-	cache    map[string]*ebimg.Image
-	cacheSeq []string // LRU order, most recent at end
+	cache    map[cacheKey]*ebimg.Image
+	lruList  *list.List                 // front = most recent, back = least recent
+	lruIndex map[cacheKey]*list.Element // key -> list element
 }
 
 // NewLoader creates a GFX loader that reads .egf files from dataDir.
@@ -32,22 +39,25 @@ func NewLoader(dataDir string) *Loader {
 
 func NewLoaderWithReader(dataDir string, reader assets.Reader) *Loader {
 	return &Loader{
-		dataDir: dataDir,
-		reader:  reader,
-		egfs:    make(map[int]*PEReader),
-		cache:   make(map[string]*ebimg.Image),
+		dataDir:  dataDir,
+		reader:   reader,
+		egfs:     make(map[int]*PEReader),
+		cache:    make(map[cacheKey]*ebimg.Image),
+		lruList:  list.New(),
+		lruIndex: make(map[cacheKey]*list.Element),
 	}
 }
 
 // LoadEGF loads and parses an EGF file, caching the PE reader.
 func (l *Loader) LoadEGF(fileID int) error {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	if _, ok := l.egfs[fileID]; ok {
+		l.mu.Unlock()
 		return nil
 	}
+	l.mu.Unlock()
 
+	// Perform I/O outside the lock
 	path := filepath.Join(l.dataDir, fmt.Sprintf("gfx%03d.egf", fileID))
 	data, err := l.reader.ReadFile(path)
 	if err != nil {
@@ -59,7 +69,12 @@ func (l *Loader) LoadEGF(fileID int) error {
 		return fmt.Errorf("parse egf %d: %w", fileID, err)
 	}
 
-	l.egfs[fileID] = pe
+	// Re-acquire lock and store (double-check pattern)
+	l.mu.Lock()
+	if _, ok := l.egfs[fileID]; !ok {
+		l.egfs[fileID] = pe
+	}
+	l.mu.Unlock()
 	return nil
 }
 
@@ -67,11 +82,14 @@ func (l *Loader) LoadEGF(fileID int) error {
 // Resource IDs in EGF files are offset by +100 from the game's graphic IDs.
 func (l *Loader) GetImage(fileID, resourceID int) (*ebimg.Image, error) {
 	resourceID += 100 // EGF resource offset
-	key := fmt.Sprintf("%d:%d", fileID, resourceID)
+	key := cacheKey{fileID, resourceID}
 
 	l.cacheMu.Lock()
 	if img, ok := l.cache[key]; ok {
-		l.touchLRU(key)
+		// O(1) LRU touch: move to front
+		if elem, ok := l.lruIndex[key]; ok {
+			l.lruList.MoveToFront(elem)
+		}
 		l.cacheMu.Unlock()
 		return img, nil
 	}
@@ -99,9 +117,15 @@ func (l *Loader) GetImage(fileID, resourceID int) (*ebimg.Image, error) {
 	img := nrgbaToEbiten(nrgba)
 
 	l.cacheMu.Lock()
+	// Check if another goroutine already cached this
+	if existing, ok := l.cache[key]; ok {
+		l.cacheMu.Unlock()
+		return existing, nil
+	}
 	l.evictLRU()
 	l.cache[key] = img
-	l.cacheSeq = append(l.cacheSeq, key)
+	elem := l.lruList.PushFront(key)
+	l.lruIndex[key] = elem
 	l.cacheMu.Unlock()
 
 	return img, nil
@@ -126,21 +150,16 @@ func (l *Loader) GetRawImage(fileID, resourceID int) (*image.NRGBA, error) {
 	return ReadDIB(pe.ResourceData(info), fileID)
 }
 
-func (l *Loader) touchLRU(key string) {
-	for i, k := range l.cacheSeq {
-		if k == key {
-			l.cacheSeq = append(l.cacheSeq[:i], l.cacheSeq[i+1:]...)
-			l.cacheSeq = append(l.cacheSeq, key)
-			return
-		}
-	}
-}
-
 func (l *Loader) evictLRU() {
-	for len(l.cache) >= lruMaxSize && len(l.cacheSeq) > 0 {
-		oldest := l.cacheSeq[0]
-		l.cacheSeq = l.cacheSeq[1:]
-		delete(l.cache, oldest)
+	for len(l.cache) >= lruMaxSize && l.lruList.Len() > 0 {
+		back := l.lruList.Back()
+		if back == nil {
+			break
+		}
+		key := back.Value.(cacheKey)
+		l.lruList.Remove(back)
+		delete(l.lruIndex, key)
+		delete(l.cache, key)
 	}
 }
 

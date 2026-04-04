@@ -7,15 +7,14 @@ import (
 )
 
 func TestBlockedTileSpecMatchesReferenceWalkBlockers(t *testing.T) {
-	for _, spec := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 16, 18, 19, 20, 21, 22, 23, 24, 25, 26} {
+	// Blocked: Wall(0), Chairs(1-7), Chest(9), BankVault(16), Edge(18), Boards(20-27), Jukebox(28)
+	for _, spec := range []int{0, 1, 2, 3, 4, 5, 6, 7, 9, 16, 18, 20, 21, 22, 23, 24, 25, 26, 27, 28} {
 		if !movement.BlockedTileSpec(spec) {
 			t.Fatalf("BlockedTileSpec(%d) = false, want true", spec)
 		}
 	}
-	if movement.BlockedTileSpec(0) {
-		t.Fatal("BlockedTileSpec(0) = true, want false")
-	}
-	for _, spec := range []int{12, 13, 14, 15, 17, 27} {
+	// Walkable: no-spec(-1), reserved(8,10,11), warps(12-15), NpcBoundary(17), FakeWall(19)
+	for _, spec := range []int{-1, 8, 10, 11, 12, 13, 14, 15, 17, 19, 29} {
 		if movement.BlockedTileSpec(spec) {
 			t.Fatalf("BlockedTileSpec(%d) = true, want false", spec)
 		}

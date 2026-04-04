@@ -26,8 +26,10 @@ func handleWarpRequest(c *Client, reader *data.EoReader) error {
 		return fmt.Errorf("warp failed while sending warp accept: %w", err)
 	}
 
+	c.mu.Lock()
 	c.Character.MapID = pkt.MapId
 	c.SessionID = pkt.SessionId
+	c.mu.Unlock()
 
 	slog.Info("warp request", "mapID", pkt.MapId, "sessionID", pkt.SessionId)
 	return nil

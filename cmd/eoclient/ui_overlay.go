@@ -36,6 +36,15 @@ type overlayState struct {
 	characterCreateOpen bool
 	statusMessage       string
 	activeMenuPanel     overlay.MenuPanel
+	chestDialogOpen     bool
+	tradeDialogOpen     bool
+	partyInviteOpen     bool
+	contextMenuOpen     bool
+	contextMenuX        int
+	contextMenuY        int
+	contextMenuPlayerID int
+	contextMenuName     string
+	chestX, chestY      int
 	selectedInventory   int
 	inventoryPage       int
 	lastClickItem       int
@@ -93,6 +102,16 @@ func (g *Game) drawOverlayScreen(screen *ebiten.Image) {
 		g.drawChat(screen, theme)
 		g.drawWorldHoverTooltip(screen, theme, snapshot)
 		g.drawItemAmountPicker(screen, theme)
+		if g.overlay.chestDialogOpen {
+			g.drawChestDialog(screen, theme)
+		}
+		if g.overlay.tradeDialogOpen {
+			g.drawTradeDialog(screen, theme)
+		}
+		if g.overlay.partyInviteOpen {
+			g.drawPartyInviteDialog(screen, theme)
+		}
+		g.drawContextMenu(screen, theme)
 	}
 }
 
@@ -126,7 +145,16 @@ func (g *Game) drawGameHUD(screen *ebiten.Image, theme clientui.Theme) {
 func (g *Game) drawActiveHUDPanel(screen *ebiten.Image, theme clientui.Theme, rect image.Rectangle, snapshot game.UISnapshot) {
 	switch g.overlay.activeMenuPanel {
 	case overlay.MenuPanelStats:
-		hud.DrawStats(screen, theme, rect, snapshot)
+		buttons := hud.DrawStats(screen, theme, rect, snapshot)
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			mx, my := ebiten.CursorPosition()
+			for _, btn := range buttons {
+				if overlay.PointInRect(mx, my, btn.Rect) {
+					g.sendTrainStat(btn.StatID)
+					break
+				}
+			}
+		}
 	case overlay.MenuPanelInventory:
 		positions := g.inventoryGridPositions(snapshot.Inventory)
 		g.overlay.inventoryPage = overlay.ClampInt(g.overlay.inventoryPage, 0, hud.InventoryGridPages-1)
@@ -147,6 +175,8 @@ func (g *Game) drawActiveHUDPanel(screen *ebiten.Image, theme clientui.Theme, re
 		hud.DrawMap(screen, theme, rect, snapshot, g.autoWalk.Active, autoWalkStatusLine(g.autoWalk), g.drawMinimap)
 	case overlay.MenuPanelGuild:
 		hud.DrawPaperdoll(screen, theme, rect, snapshot, g.drawItemSlot, g.drawItemTooltip)
+	case overlay.MenuPanelParty:
+		g.drawPartyPanel(screen, theme, rect)
 	default:
 		title, lines := g.activeHUDPanelContent(snapshot)
 		clientui.DrawPanel(screen, rect, theme, clientui.PanelOptions{Title: title, Accent: theme.AccentMuted})

@@ -68,6 +68,10 @@ func RegisterAllHandlers(reg *HandlerRegistry) {
 	reg.Register(eonet.PacketFamily_Talk, eonet.PacketAction_Announce, handleTalkAnnounce)
 	// Entity handlers registered separately
 	RegisterEntityHandlers(reg)
+	RegisterStatSkillHandlers(reg)
+	RegisterChestHandlers(reg)
+	RegisterPartyHandlers(reg)
+	RegisterTradeHandlers(reg)
 }
 
 func emitChat(c *Client, channel ChatChannel, text string) {
@@ -86,6 +90,8 @@ func emitChatAllChannels(c *Client, text string) {
 }
 
 func chatCharacterName(c *Client, playerID int) string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if playerID == c.PlayerID && c.Character.Name != "" {
 		return c.Character.Name
 	}
@@ -330,6 +336,7 @@ func handleWelcomeReply(c *Client, reader *data.EoReader) error {
 	case server.WelcomeCode_EnterGame:
 		d := pkt.WelcomeCodeData.(*server.WelcomeReplyWelcomeCodeDataEnterGame)
 
+		c.mu.Lock()
 		// Populate nearby characters
 		c.NearbyChars = nil
 		for _, ch := range d.Nearby.Characters {
@@ -385,6 +392,7 @@ func handleWelcomeReply(c *Client, reader *data.EoReader) error {
 
 		syncWeight(c, d.Weight)
 		setInventoryFromNetItems(c, d.Items)
+		c.mu.Unlock()
 
 		c.SetState(StateInGame)
 		slog.Info("entered game",

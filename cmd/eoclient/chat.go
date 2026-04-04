@@ -46,6 +46,11 @@ type ChatState struct {
 	Input         string
 	Typing        bool
 	inputBuf      []rune
+
+	// Wrapped history cache (invalidated on new message or width change)
+	wrappedCache    map[game.ChatChannel][]string
+	wrappedWidth    map[game.ChatChannel]int
+	wrappedMsgCount map[game.ChatChannel]int
 }
 
 type chatSendMode int
@@ -307,10 +312,29 @@ func (g *Game) chatWrappedHistory(channel game.ChatChannel, maxWidth int) []stri
 		return nil
 	}
 	channelHistory := g.chat.History[channel]
-	wrappedHistory := make([]string, 0, len(channelHistory))
+	msgCount := len(channelHistory)
+
+	// Return cached result if inputs haven't changed
+	if g.chat.wrappedCache != nil &&
+		g.chat.wrappedWidth[channel] == maxWidth &&
+		g.chat.wrappedMsgCount[channel] == msgCount {
+		return g.chat.wrappedCache[channel]
+	}
+
+	wrappedHistory := make([]string, 0, msgCount)
 	for _, msg := range channelHistory {
 		wrappedHistory = append(wrappedHistory, wrapChatLines(msg, maxWidth)...)
 	}
+
+	// Cache the result
+	if g.chat.wrappedCache == nil {
+		g.chat.wrappedCache = make(map[game.ChatChannel][]string, len(chatChannels))
+		g.chat.wrappedWidth = make(map[game.ChatChannel]int, len(chatChannels))
+		g.chat.wrappedMsgCount = make(map[game.ChatChannel]int, len(chatChannels))
+	}
+	g.chat.wrappedCache[channel] = wrappedHistory
+	g.chat.wrappedWidth[channel] = maxWidth
+	g.chat.wrappedMsgCount[channel] = msgCount
 	return wrappedHistory
 }
 

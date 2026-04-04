@@ -44,6 +44,13 @@ type MapRenderer struct {
 	Npcs       []NpcEntity
 	Items      []ItemEntity
 	Cursor     *CursorEntity
+	CursorBuf  CursorEntity
+
+	// Pre-built tile occupancy index per layer (built on map load)
+	tileIndex [9]map[[2]int]bool
+
+	// Reusable draw command buffer
+	drawBuf []drawCmd
 }
 
 func NewMapRenderer(loader *gfx.Loader) *MapRenderer {
@@ -66,12 +73,36 @@ func (r *MapRenderer) LoadMap(path string) error {
 		return err
 	}
 	r.Map = emf
+	r.buildTileIndex()
 	return nil
 }
 
 // SetMap sets a pre-loaded map.
 func (r *MapRenderer) SetMap(emf *eomap.Emf) {
 	r.Map = emf
+	r.buildTileIndex()
+}
+
+// buildTileIndex pre-computes tile occupancy for O(1) HasTileAt lookups.
+func (r *MapRenderer) buildTileIndex() {
+	for i := range r.tileIndex {
+		r.tileIndex[i] = nil
+	}
+	if r.Map == nil {
+		return
+	}
+	for layerIdx := 0; layerIdx < len(r.Map.GraphicLayers) && layerIdx < 9; layerIdx++ {
+		layer := r.Map.GraphicLayers[layerIdx]
+		idx := make(map[[2]int]bool, len(layer.GraphicRows)*4)
+		for _, row := range layer.GraphicRows {
+			for _, tile := range row.Tiles {
+				if tile.Graphic != 0 {
+					idx[[2]int{tile.X, row.Y}] = true
+				}
+			}
+		}
+		r.tileIndex[layerIdx] = idx
+	}
 }
 
 // IsoToScreen converts isometric tile coordinates to screen pixel coordinates.
@@ -129,13 +160,14 @@ func (r *MapRenderer) DrawWithMid(screen *ebiten.Image, mid func()) {
 }
 
 func drawCmds(screen *ebiten.Image, cmds []drawCmd) {
+	var op ebiten.DrawImageOptions
 	for _, cmd := range cmds {
-		op := &ebiten.DrawImageOptions{}
+		op = ebiten.DrawImageOptions{}
 		op.GeoM.Translate(cmd.sx, cmd.sy)
 		if cmd.alpha > 0 {
 			op.ColorScale.ScaleAlpha(cmd.alpha)
 		}
-		screen.DrawImage(cmd.img, op)
+		screen.DrawImage(cmd.img, &op)
 	}
 }
 
@@ -164,6 +196,9 @@ func (r *MapRenderer) buildDrawState(screen *ebiten.Image) mapDrawState {
 	state.camSX, state.camSY = IsoToScreen(r.CamX, r.CamY)
 	state.camSX += r.CamOffX
 	state.camSY += r.CamOffY
+
+	// Reuse draw buffer from previous frame
+	r.drawBuf = r.drawBuf[:0]
 
 	for layerIdx := 0; layerIdx < 9 && layerIdx < len(r.Map.GraphicLayers); layerIdx++ {
 		layer := r.Map.GraphicLayers[layerIdx]
@@ -197,7 +232,7 @@ func (r *MapRenderer) buildDrawState(screen *ebiten.Image) mapDrawState {
 				if layerIdx == 7 {
 					alpha = 0.2
 				}
-				state.underlayCmds = append(state.underlayCmds, drawCmd{img: img, sx: sx, sy: sy, depth: depth, alpha: alpha})
+				r.drawBuf = append(r.drawBuf, drawCmd{img: img, sx: sx, sy: sy, depth: depth, alpha: alpha})
 			}
 		}
 
@@ -205,11 +240,12 @@ func (r *MapRenderer) buildDrawState(screen *ebiten.Image) mapDrawState {
 			fillImg, err := r.Loader.GetImage(gfxFileID, r.Map.FillTile)
 			if err == nil && fillImg != nil {
 				fillImg = normalizeStaticTileImage(0, fillImg)
-				r.drawFillTiles(screen, fillImg, state.camSX, state.camSY, state.halfW, state.halfH, &state.underlayCmds)
+				r.drawFillTiles(screen, fillImg, state.camSX, state.camSY, state.halfW, state.halfH, &r.drawBuf)
 			}
 		}
 	}
 
+	state.underlayCmds = r.drawBuf
 	slices.SortFunc(state.underlayCmds, func(a, b drawCmd) int {
 		return cmp.Compare(a.depth, b.depth)
 	})
@@ -243,21 +279,14 @@ func (r *MapRenderer) HasTileAt(layerIdx, x, y int) bool {
 	if r == nil || r.Map == nil {
 		return false
 	}
-	if layerIdx >= len(r.Map.GraphicLayers) {
+	if layerIdx < 0 || layerIdx >= 9 {
 		return false
 	}
-	layer := r.Map.GraphicLayers[layerIdx]
-	for _, row := range layer.GraphicRows {
-		if row.Y != y {
-			continue
-		}
-		for _, tile := range row.Tiles {
-			if tile.X == x && tile.Graphic != 0 {
-				return true
-			}
-		}
+	idx := r.tileIndex[layerIdx]
+	if idx == nil {
+		return false
 	}
-	return false
+	return idx[[2]int{x, y}]
 }
 
 func normalizeStaticTileImage(layer int, img *ebiten.Image) *ebiten.Image {

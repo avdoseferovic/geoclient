@@ -87,6 +87,7 @@ func (g *Game) sendWalk(dir int) {
 	}
 
 	// Update local position: 0=Down, 1=Left, 2=Up, 3=Right
+	g.client.Lock()
 	switch dir {
 	case 0: // Down
 		g.client.Character.Y++
@@ -107,12 +108,14 @@ func (g *Game) sendWalk(dir int) {
 			break
 		}
 	}
+	charX, charY := g.client.Character.X, g.client.Character.Y
+	g.client.Unlock()
 
 	if err := bus.SendSequenced(&client.WalkPlayerClientPacket{
 		WalkAction: client.WalkAction{
 			Direction: eoproto.Direction(dir),
 			Timestamp: 0,
-			Coords:    eoproto.Coords{X: g.client.Character.X, Y: g.client.Character.Y},
+			Coords:    eoproto.Coords{X: charX, Y: charY},
 		},
 	}); err != nil {
 		slog.Error("send walk failed", "err", err)
@@ -140,6 +143,7 @@ func (g *Game) sendFace(dir int) {
 	if bus == nil {
 		return
 	}
+	g.client.Lock()
 	g.client.Character.Direction = eoproto.Direction(dir)
 
 	// Sync nearby chars entry
@@ -149,6 +153,7 @@ func (g *Game) sendFace(dir int) {
 			break
 		}
 	}
+	g.client.Unlock()
 
 	if err := bus.SendSequenced(&client.FacePlayerClientPacket{
 		Direction: eoproto.Direction(dir),
@@ -239,6 +244,159 @@ func isEquippableType(t pub.ItemType) bool {
 
 func isDualSlotType(t pub.ItemType) bool {
 	return t == pub.Item_Ring || t == pub.Item_Armlet || t == pub.Item_Bracer
+}
+
+func (g *Game) sendTrainStat(statID int) {
+	bus := g.client.GetBus()
+	if bus == nil || statID < 1 || statID > 6 {
+		return
+	}
+	if err := bus.SendSequenced(&client.StatSkillAddClientPacket{
+		ActionType: client.Train_Stat,
+		ActionTypeData: &client.StatSkillAddActionTypeDataStat{
+			StatId: client.StatId(statID),
+		},
+	}); err != nil {
+		slog.Error("send train stat failed", "statID", statID, "err", err)
+	}
+}
+
+func (g *Game) sendTradeRequest(playerID int) {
+	bus := g.client.GetBus()
+	if bus == nil {
+		return
+	}
+	if err := bus.SendSequenced(&client.TradeRequestClientPacket{PlayerId: playerID}); err != nil {
+		slog.Error("send trade request failed", "err", err)
+	}
+}
+
+func (g *Game) sendTradeAccept(playerID int) {
+	bus := g.client.GetBus()
+	if bus == nil {
+		return
+	}
+	if err := bus.SendSequenced(&client.TradeAcceptClientPacket{PlayerId: playerID}); err != nil {
+		slog.Error("send trade accept failed", "err", err)
+	}
+}
+
+func (g *Game) sendTradeAdd(itemID, amount int) {
+	bus := g.client.GetBus()
+	if bus == nil {
+		return
+	}
+	if err := bus.SendSequenced(&client.TradeAddClientPacket{
+		AddItem: eonet.Item{Id: itemID, Amount: amount},
+	}); err != nil {
+		slog.Error("send trade add failed", "err", err)
+	}
+}
+
+func (g *Game) sendTradeRemove(itemID int) {
+	bus := g.client.GetBus()
+	if bus == nil {
+		return
+	}
+	if err := bus.SendSequenced(&client.TradeRemoveClientPacket{ItemId: itemID}); err != nil {
+		slog.Error("send trade remove failed", "err", err)
+	}
+}
+
+func (g *Game) sendTradeAgree(agree bool) {
+	bus := g.client.GetBus()
+	if bus == nil {
+		return
+	}
+	if err := bus.SendSequenced(&client.TradeAgreeClientPacket{Agree: agree}); err != nil {
+		slog.Error("send trade agree failed", "err", err)
+	}
+}
+
+func (g *Game) sendTradeClose() {
+	bus := g.client.GetBus()
+	if bus == nil {
+		return
+	}
+	if err := bus.SendSequenced(&client.TradeCloseClientPacket{}); err != nil {
+		slog.Error("send trade close failed", "err", err)
+	}
+}
+
+func (g *Game) sendPartyRequest(playerID int, requestType int) {
+	bus := g.client.GetBus()
+	if bus == nil {
+		return
+	}
+	if err := bus.SendSequenced(&client.PartyRequestClientPacket{
+		RequestType: eonet.PartyRequestType(requestType),
+		PlayerId:    playerID,
+	}); err != nil {
+		slog.Error("send party request failed", "err", err)
+	}
+}
+
+func (g *Game) sendPartyAccept(playerID int, requestType int) {
+	bus := g.client.GetBus()
+	if bus == nil {
+		return
+	}
+	if err := bus.SendSequenced(&client.PartyAcceptClientPacket{
+		RequestType:     eonet.PartyRequestType(requestType),
+		InviterPlayerId: playerID,
+	}); err != nil {
+		slog.Error("send party accept failed", "err", err)
+	}
+}
+
+func (g *Game) sendPartyRemove(playerID int) {
+	bus := g.client.GetBus()
+	if bus == nil {
+		return
+	}
+	if err := bus.SendSequenced(&client.PartyRemoveClientPacket{
+		PlayerId: playerID,
+	}); err != nil {
+		slog.Error("send party remove failed", "err", err)
+	}
+}
+
+func (g *Game) sendChestOpen(x, y int) {
+	bus := g.client.GetBus()
+	if bus == nil {
+		return
+	}
+	if err := bus.SendSequenced(&client.ChestOpenClientPacket{
+		Coords: eoproto.Coords{X: x, Y: y},
+	}); err != nil {
+		slog.Error("send chest open failed", "err", err)
+	}
+}
+
+func (g *Game) sendChestTake(x, y, itemID int) {
+	bus := g.client.GetBus()
+	if bus == nil {
+		return
+	}
+	if err := bus.SendSequenced(&client.ChestTakeClientPacket{
+		Coords:     eoproto.Coords{X: x, Y: y},
+		TakeItemId: itemID,
+	}); err != nil {
+		slog.Error("send chest take failed", "err", err)
+	}
+}
+
+func (g *Game) sendChestAdd(x, y, itemID, amount int) {
+	bus := g.client.GetBus()
+	if bus == nil {
+		return
+	}
+	if err := bus.SendSequenced(&client.ChestAddClientPacket{
+		Coords:  eoproto.Coords{X: x, Y: y},
+		AddItem: eonet.ThreeItem{Id: itemID, Amount: amount},
+	}); err != nil {
+		slog.Error("send chest add failed", "err", err)
+	}
 }
 
 func dualSlotFirstOccupied(eq server.EquipmentPaperdoll, t pub.ItemType) bool {

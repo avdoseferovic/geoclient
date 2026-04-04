@@ -10,6 +10,7 @@ const (
 	MenuPanelInventory
 	MenuPanelMap
 	MenuPanelGuild
+	MenuPanelParty
 )
 
 type HUDLayout struct {
@@ -27,7 +28,7 @@ type HUDMenuButton struct {
 
 func InGameHUDLayout(sw, sh int) HUDLayout {
 	statusW := 390
-	menuHeight := 74
+	menuHeight := 98
 	const edgeInset = 6
 	return HUDLayout{
 		StatusRect:    image.Rect((sw-statusW)/2, edgeInset, (sw-statusW)/2+statusW, edgeInset+20),
@@ -59,6 +60,7 @@ func HUDMenuButtons(layout HUDLayout) []HUDMenuButton {
 		{panel: MenuPanelInventory, label: "Bag"},
 		{panel: MenuPanelMap, label: "Map"},
 		{panel: MenuPanelGuild, label: "Doll"},
+		{panel: MenuPanelParty, label: "Party"},
 	}
 	buttons := make([]HUDMenuButton, 0, len(panels))
 	for i, entry := range panels {

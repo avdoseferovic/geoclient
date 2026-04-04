@@ -448,27 +448,27 @@ func renderAttachment(screen *ebiten.Image, img *ebiten.Image, bodyX, bodyY floa
 	renderImage(screen, img, x, y, mirrored, alpha, hitProg)
 }
 
-func weaponGraphicID(weapon int, frame CharacterFrame) (int, bool) {
-	frameMap := map[CharacterFrame]int{
-		FrameStandDown:  0,
-		FrameStandUp:    1,
-		FrameWalkDown1:  2,
-		FrameWalkDown2:  3,
-		FrameWalkDown3:  4,
-		FrameWalkDown4:  5,
-		FrameWalkUp1:    6,
-		FrameWalkUp2:    7,
-		FrameWalkUp3:    8,
-		FrameWalkUp4:    9,
-		FrameRaisedDown: 10,
-		FrameRaisedUp:   11,
-		FrameMeleeDown1: 12,
-		FrameMeleeDown2: 13,
-		FrameMeleeUp1:   14,
-		FrameMeleeUp2:   15,
-	}
+var weaponFrameMap = map[CharacterFrame]int{
+	FrameStandDown:  0,
+	FrameStandUp:    1,
+	FrameWalkDown1:  2,
+	FrameWalkDown2:  3,
+	FrameWalkDown3:  4,
+	FrameWalkDown4:  5,
+	FrameWalkUp1:    6,
+	FrameWalkUp2:    7,
+	FrameWalkUp3:    8,
+	FrameWalkUp4:    9,
+	FrameRaisedDown: 10,
+	FrameRaisedUp:   11,
+	FrameMeleeDown1: 12,
+	FrameMeleeDown2: 13,
+	FrameMeleeUp1:   14,
+	FrameMeleeUp2:   15,
+}
 
-	index, ok := frameMap[frame]
+func weaponGraphicID(weapon int, frame CharacterFrame) (int, bool) {
+	index, ok := weaponFrameMap[frame]
 	if !ok {
 		return 0, false
 	}
@@ -585,9 +585,9 @@ func RenderItem(screen *ebiten.Image, loader *gfx.Loader, item *ItemEntity, sx, 
 	w := float64(img.Bounds().Dx())
 	h := float64(img.Bounds().Dy())
 
-	op := &ebiten.DrawImageOptions{}
+	var op ebiten.DrawImageOptions
 	op.GeoM.Translate(sx-w/2, sy-h/2)
-	screen.DrawImage(img, op)
+	screen.DrawImage(img, &op)
 }
 
 func RenderCursor(screen *ebiten.Image, loader *gfx.Loader, cursor *CursorEntity, sx, sy float64) {
@@ -613,12 +613,14 @@ func RenderCursor(screen *ebiten.Image, loader *gfx.Loader, cursor *CursorEntity
 	screen.DrawImage(sub, op)
 }
 
+var indicatorFace = textv2.NewGoXFace(basicfont.Face7x13)
+
 func renderIndicators(screen *ebiten.Image, indicators []CombatIndicator, sx, baseY float64) {
 	if len(indicators) == 0 {
 		return
 	}
 
-	face := textv2.NewGoXFace(basicfont.Face7x13)
+	face := indicatorFace
 	ascent := float64(basicfont.Face7x13.Metrics().Ascent.Ceil())
 	for i := range indicators {
 		indicator := indicators[len(indicators)-1-i]

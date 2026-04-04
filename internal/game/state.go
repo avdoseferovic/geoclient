@@ -7,6 +7,7 @@ import (
 
 	"github.com/ethanmoffat/eolib-go/v3/protocol"
 	eonet "github.com/ethanmoffat/eolib-go/v3/protocol/net"
+	netclient "github.com/ethanmoffat/eolib-go/v3/protocol/net/client"
 	"github.com/ethanmoffat/eolib-go/v3/protocol/net/server"
 
 	"github.com/avdo/eoweb/internal/net"
@@ -89,6 +90,48 @@ type CharacterCombatStats struct {
 type InventoryItem struct {
 	ID     int
 	Amount int
+}
+
+type ChestItem struct {
+	ID     int
+	Amount int
+}
+
+type PartyMember struct {
+	PlayerID     int
+	Name         string
+	Level        int
+	HpPercentage int
+	Leader       bool
+}
+
+type PendingPartyInvite struct {
+	PlayerID    int
+	PlayerName  string
+	RequestType int
+}
+
+type TradeStateType int
+
+const (
+	TradeStateNone TradeStateType = iota
+	TradeStatePending
+	TradeStateOpen
+)
+
+type TradeItem struct {
+	ID     int
+	Amount int
+}
+
+type TradeState struct {
+	State         TradeStateType
+	PartnerID     int
+	PartnerName   string
+	PlayerItems   []TradeItem
+	PartnerItems  []TradeItem
+	PlayerAgreed  bool
+	PartnerAgreed bool
 }
 
 type AccountCreateProfile struct {
@@ -404,6 +447,17 @@ type Client struct {
 	Inventory   []InventoryItem
 	Equipment   server.EquipmentPaperdoll
 
+	// Chest state
+	ChestItems []ChestItem
+	ChestOpen  bool
+
+	// Party state
+	PartyMembers       []PartyMember
+	PendingPartyInvite *PendingPartyInvite
+
+	// Trade state
+	Trade TradeState
+
 	// Lookup callback set by the UI layer.
 	ItemTypeFunc func(int) int
 
@@ -416,6 +470,10 @@ type Client struct {
 
 	// Events channel for UI updates
 	Events chan Event
+
+	// Per-frame snapshot cache
+	snapshotTick  uint64
+	snapshotCache UISnapshot
 }
 
 type EventType int
@@ -428,6 +486,14 @@ const (
 	EventAccountCreated
 	EventEnterGame
 	EventWarp
+	EventStatsUpdated
+	EventChestOpened
+	EventChestChanged
+	EventTradeRequested
+	EventTradeOpened
+	EventTradeClosed
+	EventTradeUpdated
+	EventPartyUpdated
 )
 
 type Event struct {
@@ -466,13 +532,14 @@ type ChatMessage struct {
 }
 
 type UISnapshot struct {
-	PlayerID    int
-	Character   Character
-	Inventory   []InventoryItem
-	Equipment   server.EquipmentPaperdoll
-	NearbyChars []NearbyCharacter
-	NearbyNpcs  []NearbyNPC
-	NearbyItems []NearbyItem
+	snapshotTick uint64
+	PlayerID     int
+	Character    Character
+	Inventory    []InventoryItem
+	Equipment    server.EquipmentPaperdoll
+	NearbyChars  []NearbyCharacter
+	NearbyNpcs   []NearbyNPC
+	NearbyItems  []NearbyItem
 }
 
 func NewClient() *Client {
@@ -509,7 +576,12 @@ func (c *Client) Emit(evt Event) {
 }
 
 func (c *Client) EmitCritical(evt Event) {
-	c.Events <- evt
+	select {
+	case c.Events <- evt:
+	default:
+		slog.Error("critical event channel full, blocking", "type", evt.Type)
+		c.Events <- evt
+	}
 }
 
 func (c *Client) Lock()   { c.mu.Lock() }
@@ -527,32 +599,55 @@ func (c *Client) GetBus() *net.PacketBus {
 	return c.Bus
 }
 
+// InvalidateSnapshot marks the cached snapshot as stale. Call once per frame
+// before any UISnapshot() calls to ensure fresh data.
+func (c *Client) InvalidateSnapshot() {
+	c.snapshotTick++
+}
+
 func (c *Client) UISnapshot() UISnapshot {
+	c.mu.RLock()
+	tick := c.snapshotTick
+	if c.snapshotCache.PlayerID != 0 && tick == c.snapshotCache.snapshotTick {
+		snap := c.snapshotCache
+		c.mu.RUnlock()
+		return snap
+	}
+	c.mu.RUnlock()
+
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	snapshot := UISnapshot{
-		PlayerID:    c.PlayerID,
-		Character:   c.Character,
-		Inventory:   slices.Clone(c.Inventory),
-		NearbyChars: slices.Clone(c.NearbyChars),
-		NearbyNpcs:  slices.Clone(c.NearbyNpcs),
-		NearbyItems: slices.Clone(c.NearbyItems),
+		snapshotTick: tick,
+		PlayerID:     c.PlayerID,
+		Character:    c.Character,
+		Inventory:    slices.Clone(c.Inventory),
+		NearbyChars:  slices.Clone(c.NearbyChars),
+		NearbyNpcs:   slices.Clone(c.NearbyNpcs),
+		NearbyItems:  slices.Clone(c.NearbyItems),
 	}
 	snapshot.Equipment = c.Equipment
 	snapshot.Equipment.Ring = slices.Clone(c.Equipment.Ring)
 	snapshot.Equipment.Armlet = slices.Clone(c.Equipment.Armlet)
 	snapshot.Equipment.Bracer = slices.Clone(c.Equipment.Bracer)
+	c.snapshotCache = snapshot
 	return snapshot
 }
 
 func (c *Client) Disconnect() {
 	c.mu.Lock()
 	bus := c.Bus
+	inTrade := c.Trade.State != TradeStateNone
+	c.Trade = TradeState{}
 	c.Bus = nil
 	c.mu.Unlock()
 
 	if bus != nil {
+		// Clean up server-side trade state before closing
+		if inTrade {
+			_ = bus.SendSequenced(&netclient.TradeCloseClientPacket{})
+		}
 		if err := bus.Close(); err != nil {
 			slog.Debug("close packet bus", "err", err)
 		}

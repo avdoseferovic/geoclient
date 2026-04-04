@@ -1,7 +1,10 @@
 package net
 
+import "sync"
+
 // Sequencer tracks packet sequence numbers for the EO protocol.
 type Sequencer struct {
+	mu      sync.Mutex
 	start   int
 	counter int
 }
@@ -12,18 +15,24 @@ func NewSequencer() *Sequencer {
 
 // NextSequence returns the next sequence value and advances the counter (0-9 cycle).
 func (s *Sequencer) NextSequence() int {
+	s.mu.Lock()
 	result := s.start + s.counter
 	s.counter = (s.counter + 1) % 10
+	s.mu.Unlock()
 	return result
 }
 
 // SetStart sets the sequence start value without resetting the counter.
 func (s *Sequencer) SetStart(start int) {
+	s.mu.Lock()
 	s.start = start
+	s.mu.Unlock()
 }
 
 // Reset sets the sequence start and resets the counter to 0.
 func (s *Sequencer) Reset(start int) {
+	s.mu.Lock()
 	s.start = start
 	s.counter = 0
+	s.mu.Unlock()
 }

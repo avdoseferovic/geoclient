@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"time"
 )
 
 // HTTPReader loads assets over HTTP. This is used by the browser client.
@@ -17,7 +18,7 @@ type HTTPReader struct {
 func NewHTTPReader(baseURL string) *HTTPReader {
 	return &HTTPReader{
 		BaseURL: strings.TrimRight(baseURL, "/"),
-		Client:  http.DefaultClient,
+		Client:  &http.Client{Timeout: 30 * time.Second},
 	}
 }
 

@@ -11,7 +11,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const writeDeadline = 10 * time.Second
+const (
+	writeDeadline = 10 * time.Second
+	readDeadline  = 90 * time.Second
+)
 
 // Conn wraps a WebSocket connection for EO protocol communication.
 type Conn struct {
@@ -38,7 +41,7 @@ func Dial(addr string) (*Conn, error) {
 // Web clients include a 2-byte EO length prefix in the message which is stripped.
 // Returns action + family + payload bytes.
 func (c *Conn) ReadPacket() ([]byte, error) {
-	_ = c.ws.SetReadDeadline(time.Time{})
+	_ = c.ws.SetReadDeadline(time.Now().Add(readDeadline))
 	msgType, msg, err := c.ws.ReadMessage()
 	if err != nil {
 		return nil, err

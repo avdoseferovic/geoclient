@@ -17,7 +17,7 @@ type entityCmd struct {
 // buildEntityDrawCmds collects renderable entities with the same depth model as the reference client.
 func (r *MapRenderer) buildEntityDrawCmds(screen *ebiten.Image, camSX, camSY, halfW, halfH float64) []entityCmd {
 	sw, sh := float64(screen.Bounds().Dx()), float64(screen.Bounds().Dy())
-	var ents []entityCmd
+	ents := make([]entityCmd, 0, len(r.Items)+len(r.Npcs)+len(r.Characters)+1)
 
 	for i := range r.Items {
 		it := &r.Items[i]

@@ -208,7 +208,7 @@ func (g *Game) stepBlockerAt(tileX, tileY int) stepBlocker {
 
 func (g *Game) tileSpecAt(tileX, tileY int) int {
 	if g.mapRenderer.Map == nil {
-		return 0
+		return -1
 	}
 	for _, row := range g.mapRenderer.Map.TileSpecRows {
 		if row.Y != tileY {
@@ -220,7 +220,7 @@ func (g *Game) tileSpecAt(tileX, tileY int) int {
 			}
 		}
 	}
-	return 0
+	return -1
 }
 
 func (g *Game) isAttackTargetTile(tileX, tileY int) bool {
@@ -245,7 +245,8 @@ func (g *Game) isAttackTargetTile(tileX, tileY int) bool {
 
 func (g *Game) getCursorType(tileX, tileY int) int {
 	spec := g.tileSpecAt(tileX, tileY)
-	if spec == 1 || spec == 16 {
+	// Wall (0) and Edge (18) hide the cursor entirely
+	if spec == 0 || spec == 18 {
 		return -1
 	}
 	if movement.BlockedTileSpec(spec) {

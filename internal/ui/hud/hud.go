@@ -29,7 +29,13 @@ type InventoryGridPos struct {
 	H    int
 }
 
-func DrawStats(screen *ebiten.Image, theme clientui.Theme, rect image.Rectangle, snapshot game.UISnapshot) {
+// StatButton represents a clickable stat training button in the stats panel.
+type StatButton struct {
+	Rect   image.Rectangle
+	StatID int // 1=STR, 2=INT, 3=WIS, 4=AGI, 5=CON, 6=CHA
+}
+
+func DrawStats(screen *ebiten.Image, theme clientui.Theme, rect image.Rectangle, snapshot game.UISnapshot) []StatButton {
 	clientui.DrawPanel(screen, rect, theme, clientui.PanelOptions{Title: "Stats", Accent: theme.AccentMuted})
 	sections := []image.Rectangle{
 		image.Rect(rect.Min.X+10, rect.Min.Y+22, rect.Max.X-10, rect.Min.Y+72),
@@ -42,13 +48,54 @@ func DrawStats(screen *ebiten.Image, theme clientui.Theme, rect image.Rectangle,
 	clientui.DrawTextf(screen, sections[0].Min.X+8, sections[0].Min.Y+14, theme.Text, "%s • Lvl %d", overlay.FallbackString(snapshot.Character.Name, "Wayfarer"), snapshot.Character.Level)
 	clientui.DrawTextf(screen, sections[0].Min.X+8, sections[0].Min.Y+28, theme.TextDim, "Class %d • EXP %d", snapshot.Character.ClassID, snapshot.Character.Experience)
 	clientui.DrawTextf(screen, sections[0].Min.X+8, sections[0].Min.Y+42, theme.TextDim, "HP %d/%d • TP %d/%d", snapshot.Character.HP, snapshot.Character.MaxHP, snapshot.Character.TP, snapshot.Character.MaxTP)
-	clientui.DrawTextf(screen, sections[1].Min.X+8, sections[1].Min.Y+14, theme.Text, "Stats %d/%d pts", snapshot.Character.StatPoints, snapshot.Character.SkillPoints)
-	clientui.DrawTextf(screen, sections[1].Min.X+8, sections[1].Min.Y+28, theme.TextDim, "STR %d  INT %d  WIS %d", snapshot.Character.BaseStats.Str, snapshot.Character.BaseStats.Int, snapshot.Character.BaseStats.Wis)
-	clientui.DrawTextf(screen, sections[1].Min.X+8, sections[1].Min.Y+42, theme.TextDim, "AGI %d  CON %d  CHA %d", snapshot.Character.BaseStats.Agi, snapshot.Character.BaseStats.Con, snapshot.Character.BaseStats.Cha)
+
+	hasPoints := snapshot.Character.StatPoints > 0
+	pointsColor := theme.Text
+	if hasPoints {
+		pointsColor = color.NRGBA{R: 110, G: 255, B: 140, A: 255}
+	}
+	clientui.DrawTextf(screen, sections[1].Min.X+8, sections[1].Min.Y+14, pointsColor, "Stats %d/%d pts", snapshot.Character.StatPoints, snapshot.Character.SkillPoints)
+
+	// Stat buttons (clickable when stat points available)
+	var buttons []StatButton
+	sx := sections[1].Min.X + 8
+	statRow1Y := sections[1].Min.Y + 28
+	statRow2Y := sections[1].Min.Y + 42
+	bw := 50
+
+	stats := []struct {
+		label string
+		value int
+		id    int
+		x, y  int
+	}{
+		{"STR", snapshot.Character.BaseStats.Str, 1, sx, statRow1Y},
+		{"INT", snapshot.Character.BaseStats.Int, 2, sx + bw + 4, statRow1Y},
+		{"WIS", snapshot.Character.BaseStats.Wis, 3, sx + (bw+4)*2, statRow1Y},
+		{"AGI", snapshot.Character.BaseStats.Agi, 4, sx, statRow2Y},
+		{"CON", snapshot.Character.BaseStats.Con, 5, sx + bw + 4, statRow2Y},
+		{"CHA", snapshot.Character.BaseStats.Cha, 6, sx + (bw+4)*2, statRow2Y},
+	}
+	for _, s := range stats {
+		r := image.Rect(s.x, s.y-10, s.x+bw, s.y+4)
+		txtColor := theme.TextDim
+		if hasPoints {
+			txtColor = theme.Text
+			buttons = append(buttons, StatButton{Rect: r, StatID: s.id})
+			// Draw hover highlight
+			mx, my := ebiten.CursorPosition()
+			if overlay.PointInRect(mx, my, r) {
+				clientui.FillRect(screen, float64(r.Min.X), float64(r.Min.Y), float64(r.Dx()), float64(r.Dy()), overlay.Colorize(theme.Accent, 50))
+			}
+		}
+		clientui.DrawTextf(screen, s.x, s.y, txtColor, "%s %d", s.label, s.value)
+	}
+
 	clientui.DrawTextf(screen, sections[2].Min.X+8, sections[2].Min.Y+14, theme.Text, "Combat")
 	clientui.DrawTextf(screen, sections[2].Min.X+8, sections[2].Min.Y+28, theme.TextDim, "Dmg %d-%d  Hit %d  Eva %d  Arm %d", snapshot.Character.CombatStats.MinDamage, snapshot.Character.CombatStats.MaxDamage, snapshot.Character.CombatStats.Accuracy, snapshot.Character.CombatStats.Evade, snapshot.Character.CombatStats.Armor)
 	clientui.DrawTextf(screen, sections[2].Min.X+8, sections[2].Min.Y+42, theme.TextDim, "Weight %d/%d  Karma %d", snapshot.Character.Weight.Current, snapshot.Character.Weight.Max, snapshot.Character.Karma)
 	clientui.DrawTextf(screen, sections[2].Min.X+8, sections[2].Min.Y+56, theme.TextDim, "Bag %d  Players %d  NPCs %d", len(snapshot.Inventory), max(0, len(snapshot.NearbyChars)-1), len(snapshot.NearbyNpcs))
+	return buttons
 }
 
 func DrawPaperdoll(screen *ebiten.Image, theme clientui.Theme, rect image.Rectangle, snapshot game.UISnapshot, drawSlot func(*ebiten.Image, clientui.Theme, image.Rectangle, string, int), drawTooltip func(*ebiten.Image, clientui.Theme, int, int, int, int)) {

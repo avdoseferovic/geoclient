@@ -107,6 +107,18 @@ func (g *Game) handleEvent(evt game.Event) {
 		g.resetMovementState()
 		g.facingDir = int(g.client.Character.Direction)
 		g.loadCurrentMap()
+	case game.EventChestOpened:
+		g.overlay.chestDialogOpen = true
+	case game.EventChestChanged:
+		// UI auto-refreshes from client.ChestItems
+	case game.EventPartyUpdated:
+		if g.client.PendingPartyInvite != nil {
+			g.overlay.partyInviteOpen = true
+		}
+	case game.EventTradeRequested, game.EventTradeOpened:
+		g.overlay.tradeDialogOpen = true
+	case game.EventTradeClosed:
+		g.overlay.tradeDialogOpen = false
 	case game.EventCharacterList:
 		g.overlay.loginSubmitting = false
 		g.overlay.selectingCharacter = false
