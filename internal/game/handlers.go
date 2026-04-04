@@ -55,13 +55,46 @@ func (r *HandlerRegistry) Dispatch(family eonet.PacketFamily, action eonet.Packe
 func RegisterAllHandlers(reg *HandlerRegistry) {
 	reg.Register(eonet.PacketFamily_Init, eonet.PacketAction_Init, handleInitInit)
 	reg.Register(eonet.PacketFamily_Connection, eonet.PacketAction_Player, handleConnectionPlayer)
+	reg.Register(eonet.PacketFamily_Account, eonet.PacketAction_Reply, handleAccountReply)
 	reg.Register(eonet.PacketFamily_Login, eonet.PacketAction_Reply, handleLoginReply)
 	reg.Register(eonet.PacketFamily_Character, eonet.PacketAction_Reply, handleCharacterReply)
 	reg.Register(eonet.PacketFamily_Welcome, eonet.PacketAction_Reply, handleWelcomeReply)
 	reg.Register(eonet.PacketFamily_Talk, eonet.PacketAction_Player, handleTalkPlayer)
+	reg.Register(eonet.PacketFamily_Talk, eonet.PacketAction_Open, handleTalkOpen)
+	reg.Register(eonet.PacketFamily_Talk, eonet.PacketAction_Msg, handleTalkMsg)
 	reg.Register(eonet.PacketFamily_Talk, eonet.PacketAction_Tell, handleTalkTell)
+	reg.Register(eonet.PacketFamily_Talk, eonet.PacketAction_Reply, handleTalkReply)
+	reg.Register(eonet.PacketFamily_Talk, eonet.PacketAction_Admin, handleTalkAdmin)
+	reg.Register(eonet.PacketFamily_Talk, eonet.PacketAction_Announce, handleTalkAnnounce)
 	// Entity handlers registered separately
 	RegisterEntityHandlers(reg)
+}
+
+func emitChat(c *Client, channel ChatChannel, text string) {
+	c.Emit(Event{Type: EventChat, Data: ChatMessage{Channel: channel, Text: text}, Message: text})
+}
+
+func emitChatAllChannels(c *Client, text string) {
+	for _, channel := range []ChatChannel{
+		ChatChannelMap,
+		ChatChannelGroup,
+		ChatChannelGlobal,
+		ChatChannelSystem,
+	} {
+		emitChat(c, channel, text)
+	}
+}
+
+func chatCharacterName(c *Client, playerID int) string {
+	if playerID == c.PlayerID && c.Character.Name != "" {
+		return c.Character.Name
+	}
+	for _, ch := range c.NearbyChars {
+		if ch.PlayerID == playerID && ch.Name != "" {
+			return ch.Name
+		}
+	}
+	return fmt.Sprintf("Player %03d", playerID)
 }
 
 func handleInitInit(c *Client, reader *data.EoReader) error {
@@ -145,6 +178,52 @@ func handleConnectionPlayer(c *Client, reader *data.EoReader) error {
 	return nil
 }
 
+func handleAccountReply(c *Client, reader *data.EoReader) error {
+	var pkt server.AccountReplyServerPacket
+	if err := pkt.Deserialize(reader); err != nil {
+		return fmt.Errorf("deserialize account reply: %w", err)
+	}
+
+	switch pkt.ReplyCode {
+	case server.AccountReply_Exists:
+		c.Emit(Event{Type: EventError, Message: "Account name already exists"})
+	case server.AccountReply_NotApproved:
+		c.Emit(Event{Type: EventError, Message: "Account name was not approved"})
+	case server.AccountReply_ChangeFailed:
+		c.Emit(Event{Type: EventError, Message: "Password change failed"})
+	case server.AccountReply_Changed:
+		c.Emit(Event{Type: EventError, Message: "Password changed"})
+	case server.AccountReply_RequestDenied:
+		c.Emit(Event{Type: EventError, Message: "Account request denied"})
+	case server.AccountReply_Created:
+		c.PendingAccountCreate = nil
+		c.Emit(Event{Type: EventAccountCreated, Message: "Account created"})
+	default:
+		pending := c.PendingAccountCreate
+		bus := c.GetBus()
+		d, ok := pkt.ReplyCodeData.(*server.AccountReplyReplyCodeDataDefault)
+		if pending == nil || bus == nil || !ok {
+			return nil
+		}
+
+		c.SessionID = int(pkt.ReplyCode)
+		bus.Sequencer.Reset(d.SequenceStart)
+		if err := bus.SendSequenced(&client.AccountCreateClientPacket{
+			SessionId: c.SessionID,
+			Username:  c.Username,
+			Password:  c.Password,
+			FullName:  pending.FullName,
+			Location:  pending.Location,
+			Email:     pending.Email,
+			Computer:  "geoclient",
+			Hdid:      "1111111111",
+		}); err != nil {
+			return fmt.Errorf("account create confirm failed: %w", err)
+		}
+	}
+	return nil
+}
+
 func handleLoginReply(c *Client, reader *data.EoReader) error {
 	var pkt server.LoginReplyServerPacket
 	if err := pkt.Deserialize(reader); err != nil {
@@ -176,16 +255,48 @@ func handleCharacterReply(c *Client, reader *data.EoReader) error {
 		return fmt.Errorf("deserialize character reply: %w", err)
 	}
 
-	d, ok := pkt.ReplyCodeData.(*server.CharacterReplyReplyCodeDataOk)
-	if !ok || len(d.Characters) == 0 {
-		c.Emit(Event{Type: EventError, Message: "Character creation failed"})
+	switch pkt.ReplyCode {
+	case server.CharacterReply_Exists:
+		c.Emit(Event{Type: EventError, Message: "Character name already exists"})
+		return nil
+	case server.CharacterReply_Full, server.CharacterReply_Full3:
+		c.Emit(Event{Type: EventError, Message: "Character roster is full"})
+		return nil
+	case server.CharacterReply_NotApproved:
+		c.Emit(Event{Type: EventError, Message: "Character name was not approved"})
+		return nil
+	case server.CharacterReply_Ok:
+		d, ok := pkt.ReplyCodeData.(*server.CharacterReplyReplyCodeDataOk)
+		if !ok || len(d.Characters) == 0 {
+			c.Emit(Event{Type: EventError, Message: "Character creation failed"})
+			return nil
+		}
+
+		c.PendingCharacterCreate = nil
+		c.Characters = d.Characters
+		c.Emit(Event{Type: EventCharacterList, Data: d.Characters})
+		slog.Info("character list updated", "count", len(d.Characters))
+		return nil
+	default:
+		pending := c.PendingCharacterCreate
+		bus := c.GetBus()
+		if pending == nil || bus == nil {
+			return nil
+		}
+
+		c.SessionID = int(pkt.ReplyCode)
+		if err := bus.SendSequenced(&client.CharacterCreateClientPacket{
+			SessionId: c.SessionID,
+			Gender:    pending.Gender,
+			HairStyle: pending.HairStyle,
+			HairColor: pending.HairColor,
+			Skin:      pending.Skin,
+			Name:      pending.Name,
+		}); err != nil {
+			return fmt.Errorf("character create confirm failed: %w", err)
+		}
 		return nil
 	}
-
-	c.Characters = d.Characters
-	c.Emit(Event{Type: EventCharacterList, Data: d.Characters})
-	slog.Info("character list updated", "count", len(d.Characters))
-	return nil
 }
 
 func handleWelcomeReply(c *Client, reader *data.EoReader) error {
@@ -301,7 +412,25 @@ func handleTalkPlayer(c *Client, reader *data.EoReader) error {
 	if err := pkt.Deserialize(reader); err != nil {
 		return err
 	}
-	c.Emit(Event{Type: EventChat, Message: fmt.Sprintf("[%d]: %s", pkt.PlayerId, pkt.Message)})
+	emitChat(c, ChatChannelMap, fmt.Sprintf("%s: %s", chatCharacterName(c, pkt.PlayerId), pkt.Message))
+	return nil
+}
+
+func handleTalkOpen(c *Client, reader *data.EoReader) error {
+	var pkt server.TalkOpenServerPacket
+	if err := pkt.Deserialize(reader); err != nil {
+		return err
+	}
+	emitChat(c, ChatChannelGroup, fmt.Sprintf("%s: %s", chatCharacterName(c, pkt.PlayerId), pkt.Message))
+	return nil
+}
+
+func handleTalkMsg(c *Client, reader *data.EoReader) error {
+	var pkt server.TalkMsgServerPacket
+	if err := pkt.Deserialize(reader); err != nil {
+		return err
+	}
+	emitChat(c, ChatChannelGlobal, fmt.Sprintf("%s: %s", pkt.PlayerName, pkt.Message))
 	return nil
 }
 
@@ -310,6 +439,36 @@ func handleTalkTell(c *Client, reader *data.EoReader) error {
 	if err := pkt.Deserialize(reader); err != nil {
 		return err
 	}
-	c.Emit(Event{Type: EventChat, Message: fmt.Sprintf("[PM] %s: %s", pkt.PlayerName, pkt.Message)})
+	emitChat(c, ChatChannelMap, fmt.Sprintf("[PM] %s: %s", pkt.PlayerName, pkt.Message))
+	return nil
+}
+
+func handleTalkReply(c *Client, reader *data.EoReader) error {
+	var pkt server.TalkReplyServerPacket
+	if err := pkt.Deserialize(reader); err != nil {
+		return err
+	}
+	if pkt.ReplyCode == server.TalkReply_NotFound {
+		emitChat(c, ChatChannelSystem, fmt.Sprintf("%s could not be found.", pkt.Name))
+	}
+	return nil
+}
+
+func handleTalkAdmin(c *Client, reader *data.EoReader) error {
+	var pkt server.TalkAdminServerPacket
+	if err := pkt.Deserialize(reader); err != nil {
+		return err
+	}
+	emitChat(c, ChatChannelGroup, fmt.Sprintf("[GM] %s: %s", pkt.PlayerName, pkt.Message))
+	return nil
+}
+
+func handleTalkAnnounce(c *Client, reader *data.EoReader) error {
+	var pkt server.TalkAnnounceServerPacket
+	if err := pkt.Deserialize(reader); err != nil {
+		return err
+	}
+	text := fmt.Sprintf("[Announcement] %s: %s", pkt.PlayerName, pkt.Message)
+	emitChatAllChannels(c, text)
 	return nil
 }

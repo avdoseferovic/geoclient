@@ -238,9 +238,10 @@ func (item ItemDef) typeLabel() string {
 	}
 
 	prefix := "normal"
-	if item.Special == pub.ItemSpecial_Cursed {
+	switch item.Special {
+	case pub.ItemSpecial_Cursed:
 		prefix = "cursed"
-	} else if item.Special == pub.ItemSpecial_Lore {
+	case pub.ItemSpecial_Lore:
 		prefix = "lore"
 	}
 	if item.Type == pub.Item_Armor {

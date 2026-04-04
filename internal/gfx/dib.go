@@ -268,23 +268,23 @@ func decodeRLE8(data []byte, pixelStart, w, h int, topDown bool, palette []color
 func applyTransparency(img *image.NRGBA, fileID int) {
 	isHat := hatFileIDs[fileID]
 
-	// Check if hat files use (8,0,0) transparency
-	var transR, transG, transB uint8
+	has800 := false
 	if isHat {
-		has800 := false
 		for i := 0; i < len(img.Pix); i += 4 {
 			if img.Pix[i] == 8 && img.Pix[i+1] == 0 && img.Pix[i+2] == 0 {
 				has800 = true
 				break
 			}
 		}
-		if has800 {
-			transR = 8
-		}
 	}
 
 	for i := 0; i < len(img.Pix); i += 4 {
-		if img.Pix[i] == transR && img.Pix[i+1] == transG && img.Pix[i+2] == transB {
+		r, g, b := img.Pix[i], img.Pix[i+1], img.Pix[i+2]
+		if r == 0 && g == 0 && b == 0 {
+			img.Pix[i+3] = 0
+			continue
+		}
+		if isHat && has800 && r == 8 && g == 0 && b == 0 {
 			img.Pix[i+3] = 0
 		}
 	}

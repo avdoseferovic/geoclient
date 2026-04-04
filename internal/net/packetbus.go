@@ -12,7 +12,7 @@ import (
 
 // PacketBus handles reading/writing EO protocol packets with encryption and sequencing.
 type PacketBus struct {
-	conn      *Conn
+	conn      PacketConn
 	mu        sync.Mutex
 	Sequencer *Sequencer
 
@@ -20,8 +20,15 @@ type PacketBus struct {
 	DecodeMultiple int // for decrypting incoming packets
 }
 
+// PacketConn captures the transport operations PacketBus depends on.
+type PacketConn interface {
+	ReadPacket() ([]byte, error)
+	WritePacket([]byte) error
+	Close() error
+}
+
 // NewPacketBus creates a new PacketBus over a WebSocket connection.
-func NewPacketBus(conn *Conn) *PacketBus {
+func NewPacketBus(conn PacketConn) *PacketBus {
 	return &PacketBus{
 		conn:      conn,
 		Sequencer: NewSequencer(),

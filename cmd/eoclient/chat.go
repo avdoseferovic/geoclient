@@ -1,37 +1,93 @@
 package main
 
 import (
+	"fmt"
 	"image"
 	"log/slog"
+	"math"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 
 	"github.com/avdo/eoweb/internal/game"
-	clientui "github.com/avdo/eoweb/internal/ui"
+	"github.com/avdo/eoweb/internal/ui/overlay"
 	"github.com/ethanmoffat/eolib-go/v3/protocol/net/client"
 )
 
 const (
-	maxChatHistory  = 20
-	chatInputMaxLen = 128
+	maxChatHistory   = 20
+	chatInputMaxLen  = 128
+	chatTabHeight    = 24
+	chatLineHeight   = 14
+	chatWheelStep    = 2.0
+	chatWheelFineMax = 0.15
+	chatWheelLatch   = 18
 )
+
+var chatChannels = [...]game.ChatChannel{
+	game.ChatChannelMap,
+	game.ChatChannelGroup,
+	game.ChatChannelGlobal,
+	game.ChatChannelSystem,
+}
 
 // ChatState holds chat UI state.
 type ChatState struct {
-	History  []string
-	Input    string
-	Typing   bool
-	inputBuf []rune
+	History       map[game.ChatChannel][]string
+	Scroll        map[game.ChatChannel]float64
+	ScrollTarget  map[game.ChatChannel]float64
+	ActiveChannel game.ChatChannel
+	DragChannel   game.ChatChannel
+	Dragging      bool
+	DragOffsetY   int
+	WheelLatch    int
+	WheelSign     int
+	Input         string
+	Typing        bool
+	inputBuf      []rune
+}
+
+type chatSendMode int
+
+const (
+	chatSendMap chatSendMode = iota
+	chatSendGroup
+	chatSendGlobal
+	chatSendTell
+)
+
+type outgoingChat struct {
+	Mode    chatSendMode
+	Target  string
+	Message string
+}
+
+func newChatState() ChatState {
+	history := make(map[game.ChatChannel][]string, len(chatChannels))
+	scroll := make(map[game.ChatChannel]float64, len(chatChannels))
+	scrollTarget := make(map[game.ChatChannel]float64, len(chatChannels))
+	for _, channel := range chatChannels {
+		history[channel] = nil
+		scroll[channel] = 0
+		scrollTarget[channel] = 0
+	}
+	return ChatState{
+		History:       history,
+		Scroll:        scroll,
+		ScrollTarget:  scrollTarget,
+		ActiveChannel: game.ChatChannelMap,
+	}
 }
 
 func (g *Game) updateChat() {
-	// Toggle typing mode with Enter
+	if inpututil.IsKeyJustPressed(ebiten.KeyTab) && !g.chat.Typing {
+		g.cycleChatChannel(1)
+		return
+	}
+
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
 		if g.chat.Typing {
-			// Send message
 			msg := strings.TrimSpace(g.chat.Input)
 			if msg != "" {
 				g.sendChat(msg)
@@ -52,18 +108,18 @@ func (g *Game) updateChat() {
 		return
 	}
 
+	g.updateChatScroll()
+
 	if !g.chat.Typing {
 		return
 	}
 
-	// Backspace
 	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) && len(g.chat.inputBuf) > 0 {
 		g.chat.inputBuf = g.chat.inputBuf[:len(g.chat.inputBuf)-1]
 		g.chat.Input = string(g.chat.inputBuf)
 		return
 	}
 
-	// Capture typed characters
 	runes := ebiten.AppendInputChars(nil)
 	for _, r := range runes {
 		if len(g.chat.inputBuf) < chatInputMaxLen {
@@ -73,11 +129,134 @@ func (g *Game) updateChat() {
 	g.chat.Input = string(g.chat.inputBuf)
 }
 
-func (g *Game) addChatMessage(msg string) {
-	g.chat.History = append(g.chat.History, msg)
-	if len(g.chat.History) > maxChatHistory {
-		g.chat.History = g.chat.History[len(g.chat.History)-maxChatHistory:]
+func (g *Game) setActiveChatChannel(channel game.ChatChannel) {
+	if g.chat.History == nil {
+		g.chat = newChatState()
 	}
+	g.chat.ActiveChannel = channel
+}
+
+func (g *Game) cycleChatChannel(delta int) {
+	index := 0
+	for i, channel := range chatChannels {
+		if channel == g.chat.ActiveChannel {
+			index = i
+			break
+		}
+	}
+	index = (index + delta + len(chatChannels)) % len(chatChannels)
+	g.setActiveChatChannel(chatChannels[index])
+}
+
+func (g *Game) addChatMessage(channel game.ChatChannel, msg string) {
+	if g.chat.History == nil {
+		g.chat = newChatState()
+	}
+	g.chat.History[channel] = append(g.chat.History[channel], msg)
+	if len(g.chat.History[channel]) > maxChatHistory {
+		g.chat.History[channel] = g.chat.History[channel][len(g.chat.History[channel])-maxChatHistory:]
+	}
+}
+
+func (g *Game) updateChatScroll() {
+	if g.chat.Scroll == nil || g.chat.ScrollTarget == nil || g.chat.History == nil {
+		g.chat = newChatState()
+	}
+	panelRect, inputRect := g.chatRects()
+	historyRect := g.chatHistoryRect(panelRect, inputRect)
+	mx, my := ebiten.CursorPosition()
+	if g.chat.WheelLatch > 0 {
+		g.chat.WheelLatch--
+	} else {
+		g.chat.WheelSign = 0
+	}
+	scrollbarRect := chatScrollbarRect(historyRect)
+	thumbRect, ok := chatScrollbarThumbRect(historyRect, len(g.chatWrappedHistory(g.chat.ActiveChannel, historyRect.Dx()-14)), g.chatVisibleLineCount(inputRect), g.chat.Scroll[g.chat.ActiveChannel])
+
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		switch {
+		case ok && overlay.PointInRect(mx, my, thumbRect):
+			g.chat.Dragging = true
+			g.chat.DragChannel = g.chat.ActiveChannel
+			g.chat.DragOffsetY = my - thumbRect.Min.Y
+			return
+		case overlay.PointInRect(mx, my, scrollbarRect):
+			g.setChatScrollFromScrollbar(my, historyRect, inputRect, scrollbarRect.Dy()/2, true)
+			g.chat.Dragging = true
+			g.chat.DragChannel = g.chat.ActiveChannel
+			if thumbRect, ok := chatScrollbarThumbRect(historyRect, len(g.chatWrappedHistory(g.chat.ActiveChannel, historyRect.Dx()-14)), g.chatVisibleLineCount(inputRect), g.chat.ScrollTarget[g.chat.ActiveChannel]); ok {
+				g.chat.DragOffsetY = my - thumbRect.Min.Y
+			}
+			return
+		}
+	}
+
+	if inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
+		g.chat.Dragging = false
+	}
+
+	if g.chat.Dragging {
+		if !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+			g.chat.Dragging = false
+		} else if g.chat.DragChannel == g.chat.ActiveChannel {
+			g.setChatScrollFromScrollbar(my, historyRect, inputRect, g.chat.DragOffsetY, true)
+			return
+		}
+	}
+
+	if overlay.PointInRect(mx, my, panelRect) {
+		_, wheelY := ebiten.Wheel()
+		if wheelY != 0 {
+			if delta, coarse, sign := normalizedChatWheelDelta(wheelY); delta != 0 {
+				if coarse {
+					if g.chat.WheelLatch == 0 || g.chat.WheelSign != sign {
+						g.scrollChatLines(delta)
+						g.chat.WheelLatch = chatWheelLatch
+						g.chat.WheelSign = sign
+					}
+				} else {
+					g.scrollChatLines(delta)
+				}
+			}
+		}
+	}
+
+	if inpututil.IsKeyJustPressed(ebiten.KeyPageUp) {
+		g.scrollChatLines(6)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyPageDown) {
+		g.scrollChatLines(-6)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyHome) {
+		g.scrollChatLines(g.maxChatScroll(inputRect))
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnd) {
+		g.scrollChatLines(-g.chat.ScrollTarget[g.chat.ActiveChannel])
+	}
+
+	channel := g.chat.ActiveChannel
+	maxScroll := g.maxChatScrollForActiveChannel()
+	g.chat.ScrollTarget[channel] = clampChatScroll(g.chat.ScrollTarget[channel], maxScroll)
+	current := g.chat.Scroll[channel]
+	target := g.chat.ScrollTarget[channel]
+	if math.Abs(target-current) < 0.02 {
+		g.chat.Scroll[channel] = target
+		return
+	}
+	g.chat.Scroll[channel] = current + (target-current)*0.25
+}
+
+func (g *Game) scrollChatLines(delta float64) {
+	if delta == 0 {
+		return
+	}
+	if g.chat.History == nil {
+		g.chat = newChatState()
+	}
+	channel := g.chat.ActiveChannel
+	next := g.chat.ScrollTarget[channel] + delta
+	maxScroll := g.maxChatScrollForActiveChannel()
+	g.chat.ScrollTarget[channel] = clampChatScroll(next, maxScroll)
 }
 
 func (g *Game) sendChat(msg string) {
@@ -86,152 +265,176 @@ func (g *Game) sendChat(msg string) {
 		return
 	}
 
-	// PM: starts with "!" e.g. "!player message"
-	if strings.HasPrefix(msg, "!") {
-		parts := strings.SplitN(msg[1:], " ", 2)
-		if len(parts) == 2 {
-			if err := bus.SendSequenced(&client.TalkTellClientPacket{
-				Name:    parts[0],
-				Message: parts[1],
-			}); err != nil {
-				slog.Error("send PM failed", "err", err)
-			}
-			g.addChatMessage("[To " + parts[0] + "]: " + parts[1])
+	outgoing, ok := parseOutgoingChat(msg, g.chat.ActiveChannel)
+	if !ok {
+		g.addChatMessage(game.ChatChannelSystem, "[System] System channel is receive-only.")
+		return
+	}
+
+	switch outgoing.Mode {
+	case chatSendTell:
+		if err := bus.SendSequenced(&client.TalkTellClientPacket{
+			Name:    strings.ToLower(outgoing.Target),
+			Message: outgoing.Message,
+		}); err != nil {
+			slog.Error("send PM failed", "err", err)
 			return
 		}
-	}
-
-	// Public chat
-	if err := bus.SendSequenced(&client.TalkRequestClientPacket{
-		Message: msg,
-	}); err != nil {
-		slog.Error("send chat failed", "err", err)
-	}
-	g.addChatMessage(g.client.Character.Name + ": " + msg)
-}
-
-func (g *Game) drawChat(screen *ebiten.Image, theme clientui.Theme) {
-	panelRect, inputRect := g.chatRects()
-	clientui.DrawPanel(screen, panelRect, theme, clientui.PanelOptions{Accent: theme.AccentMuted})
-	clientui.DrawInset(screen, inputRect, theme, g.chat.Typing)
-
-	historyTop := panelRect.Min.Y + 10
-	historyWidth := inputRect.Dx() - 4
-	maxHistoryLines := max(0, (inputRect.Min.Y-historyTop)/14)
-	wrappedHistory := make([]string, 0, len(g.chat.History))
-	for _, msg := range g.chat.History {
-		wrappedHistory = append(wrappedHistory, wrapChatLines(msg, historyWidth)...)
-	}
-	if len(wrappedHistory) > maxHistoryLines {
-		wrappedHistory = wrappedHistory[len(wrappedHistory)-maxHistoryLines:]
-	}
-
-	y := inputRect.Min.Y - 8
-	for i := len(wrappedHistory) - 1; i >= 0 && y > historyTop; i-- {
-		clientui.DrawText(screen, wrappedHistory[i], panelRect.Min.X+14, y, theme.Text)
-		y -= 14
-	}
-
-	inputText := "Press Enter"
-	inputColor := theme.TextDim
-	if g.chat.Typing {
-		inputText = "> " + g.chat.Input
-		if g.overlay.ticks%40 < 20 {
-			inputText += "_"
+		g.addChatMessage(game.ChatChannelMap, fmt.Sprintf("[PM] %s->%s: %s", g.client.Character.Name, outgoing.Target, outgoing.Message))
+	case chatSendGroup:
+		if err := bus.SendSequenced(&client.TalkOpenClientPacket{Message: outgoing.Message}); err != nil {
+			slog.Error("send group chat failed", "err", err)
+			return
 		}
-		inputColor = theme.Text
-	} else if len(g.chat.History) > 0 {
-		inputText = "Reply"
+		g.addChatMessage(game.ChatChannelGroup, fmt.Sprintf("%s: %s", g.client.Character.Name, outgoing.Message))
+	case chatSendGlobal:
+		if err := bus.SendSequenced(&client.TalkMsgClientPacket{Message: outgoing.Message}); err != nil {
+			slog.Error("send global chat failed", "err", err)
+			return
+		}
+		g.addChatMessage(game.ChatChannelGlobal, fmt.Sprintf("%s: %s", g.client.Character.Name, outgoing.Message))
+	default:
+		if err := bus.SendSequenced(&client.TalkReportClientPacket{Message: outgoing.Message}); err != nil {
+			slog.Error("send map chat failed", "err", err)
+			return
+		}
+		g.addChatMessage(game.ChatChannelMap, fmt.Sprintf("%s: %s", g.client.Character.Name, outgoing.Message))
 	}
-	inputText = trimChatLineLeft(inputText, inputRect.Dx()-20)
-	clientui.DrawText(screen, inputText, inputRect.Min.X+10, inputRect.Min.Y+16, inputColor)
 }
 
-func (g *Game) chatRects() (image.Rectangle, image.Rectangle) {
-	if g.chat.Typing {
-		panelRect := image.Rect(10, g.screenH-128, 372, g.screenH-10)
-		return panelRect, image.Rect(panelRect.Min.X+12, panelRect.Max.Y-36, panelRect.Max.X-12, panelRect.Max.Y-12)
+func (g *Game) chatWrappedHistory(channel game.ChatChannel, maxWidth int) []string {
+	if g.chat.History == nil {
+		return nil
 	}
-	if len(g.chat.History) > 0 {
-		panelRect := image.Rect(10, g.screenH-102, 360, g.screenH-10)
-		return panelRect, image.Rect(panelRect.Min.X+12, panelRect.Max.Y-34, panelRect.Max.X-12, panelRect.Max.Y-12)
+	channelHistory := g.chat.History[channel]
+	wrappedHistory := make([]string, 0, len(channelHistory))
+	for _, msg := range channelHistory {
+		wrappedHistory = append(wrappedHistory, wrapChatLines(msg, maxWidth)...)
 	}
-	panelRect := image.Rect(10, g.screenH-44, 260, g.screenH-10)
-	return panelRect, image.Rect(panelRect.Min.X+12, panelRect.Min.Y+10, panelRect.Max.X-12, panelRect.Max.Y-12)
+	return wrappedHistory
 }
 
-func wrapChatLines(text string, maxWidth int) []string {
-	trimmed := strings.TrimSpace(text)
+func (g *Game) maxChatScroll(inputRect image.Rectangle) float64 {
+	maxHistoryLines := g.chatVisibleLineCount(inputRect)
+	return float64(max(0, len(g.chatWrappedHistory(g.chat.ActiveChannel, inputRect.Dx()-4))-maxHistoryLines))
+}
+
+func (g *Game) maxChatScrollForActiveChannel() float64 {
+	_, inputRect := g.chatRects()
+	return g.maxChatScroll(inputRect)
+}
+
+func (g *Game) chatVisibleLineCount(inputRect image.Rectangle) int {
+	historyTop := g.chatRectsTop()
+	return max(0, (inputRect.Min.Y-historyTop)/chatLineHeight)
+}
+
+func (g *Game) chatRectsTop() int {
+	panelRect, _ := g.chatRects()
+	return panelRect.Min.Y + chatTabHeight + 20
+}
+
+func (g *Game) setChatScrollFromScrollbar(mouseY int, historyRect, inputRect image.Rectangle, dragOffsetY int, immediate bool) {
+	maxScroll := g.maxChatScroll(inputRect)
+	if maxScroll <= 0 {
+		g.chat.ScrollTarget[g.chat.ActiveChannel] = 0
+		g.chat.Scroll[g.chat.ActiveChannel] = 0
+		return
+	}
+	trackRect := chatScrollbarRect(historyRect)
+	thumbRect, ok := chatScrollbarThumbRect(historyRect, len(g.chatWrappedHistory(g.chat.ActiveChannel, historyRect.Dx()-14)), g.chatVisibleLineCount(inputRect), g.chat.ScrollTarget[g.chat.ActiveChannel])
+	if !ok {
+		return
+	}
+	thumbH := thumbRect.Dy()
+	maxThumbTravel := max(1, trackRect.Dy()-thumbH)
+	thumbTop := mouseY - dragOffsetY
+	if thumbTop < trackRect.Min.Y {
+		thumbTop = trackRect.Min.Y
+	}
+	if thumbTop > trackRect.Max.Y-thumbH {
+		thumbTop = trackRect.Max.Y - thumbH
+	}
+	ratio := float64(thumbTop-trackRect.Min.Y) / float64(maxThumbTravel)
+	scroll := clampChatScroll((1-ratio)*maxScroll, maxScroll)
+	g.chat.ScrollTarget[g.chat.ActiveChannel] = scroll
+	if immediate {
+		g.chat.Scroll[g.chat.ActiveChannel] = scroll
+	}
+}
+
+func clampChatScroll(value, maxValue float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func normalizedChatWheelDelta(wheelY float64) (float64, bool, int) {
+	if wheelY == 0 {
+		return 0, false, 0
+	}
+	sign := 1
+	if wheelY < 0 {
+		sign = -1
+	}
+	if math.Abs(wheelY) <= chatWheelFineMax {
+		return wheelY * chatWheelStep, false, sign
+	}
+	return math.Copysign(chatWheelStep, wheelY), true, sign
+}
+
+func parseOutgoingChat(msg string, activeChannel game.ChatChannel) (outgoingChat, bool) {
+	trimmed := strings.TrimSpace(msg)
 	if trimmed == "" {
-		return []string{""}
+		return outgoingChat{}, false
 	}
 
-	words := strings.Fields(trimmed)
-	if len(words) == 0 {
-		return []string{trimmed}
-	}
-
-	lines := make([]string, 0, len(words))
-	current := words[0]
-	for _, word := range words[1:] {
-		candidate := current + " " + word
-		if clientui.MeasureText(candidate) <= maxWidth {
-			current = candidate
-			continue
+	if strings.HasPrefix(trimmed, "!") {
+		if target, message, ok := strings.Cut(trimmed[1:], " "); ok {
+			target = strings.TrimSpace(target)
+			message = strings.TrimSpace(message)
+			if target != "" && message != "" {
+				return outgoingChat{
+					Mode:    chatSendTell,
+					Target:  target,
+					Message: message,
+				}, true
+			}
 		}
-		lines = append(lines, splitOversizedChatToken(current, maxWidth)...)
-		current = word
-	}
-	lines = append(lines, splitOversizedChatToken(current, maxWidth)...)
-	return lines
-}
-
-func splitOversizedChatToken(token string, maxWidth int) []string {
-	if clientui.MeasureText(token) <= maxWidth {
-		return []string{token}
 	}
 
-	lines := make([]string, 0, len(token)/4+1)
-	current := ""
-	for _, r := range token {
-		candidate := current + string(r)
-		if current != "" && clientui.MeasureText(candidate) > maxWidth {
-			lines = append(lines, current)
-			current = string(r)
-			continue
-		}
-		current = candidate
-	}
-	if current != "" {
-		lines = append(lines, current)
-	}
-	return lines
-}
-
-func trimChatLineLeft(text string, maxWidth int) string {
-	if clientui.MeasureText(text) <= maxWidth {
-		return text
+	if strings.HasPrefix(trimmed, "~") {
+		body := strings.TrimSpace(trimmed[1:])
+		return outgoingChat{Mode: chatSendGlobal, Message: body}, body != ""
 	}
 
-	trimmed := text
-	for trimmed != "" && clientui.MeasureText("..."+trimmed) > maxWidth {
-		_, size := utf8.DecodeRuneInString(trimmed)
-		if size <= 0 {
-			break
-		}
-		trimmed = trimmed[size:]
+	if strings.HasPrefix(trimmed, "'") {
+		body := strings.TrimSpace(trimmed[1:])
+		return outgoingChat{Mode: chatSendGroup, Message: body}, body != ""
 	}
-	return "..." + trimmed
-}
 
-func max(a, b int) int {
-	if a > b {
-		return a
+	switch activeChannel {
+	case game.ChatChannelGroup:
+		return outgoingChat{Mode: chatSendGroup, Message: trimmed}, true
+	case game.ChatChannelGlobal:
+		return outgoingChat{Mode: chatSendGlobal, Message: trimmed}, true
+	case game.ChatChannelSystem:
+		return outgoingChat{}, false
+	default:
+		return outgoingChat{Mode: chatSendMap, Message: trimmed}, true
 	}
-	return b
 }
 
 // handleChatEvent processes incoming chat events from the server.
 func (g *Game) handleChatEvent(evt game.Event) {
-	g.addChatMessage(evt.Message)
+	msg, ok := evt.Data.(game.ChatMessage)
+	if !ok {
+		g.addChatMessage(game.ChatChannelSystem, evt.Message)
+		return
+	}
+	g.addChatMessage(msg.Channel, msg.Text)
 }

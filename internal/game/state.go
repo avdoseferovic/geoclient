@@ -2,6 +2,7 @@ package game
 
 import (
 	"log/slog"
+	"slices"
 	"sync"
 
 	"github.com/ethanmoffat/eolib-go/v3/protocol"
@@ -88,6 +89,20 @@ type CharacterCombatStats struct {
 type InventoryItem struct {
 	ID     int
 	Amount int
+}
+
+type AccountCreateProfile struct {
+	FullName string
+	Location string
+	Email    string
+}
+
+type CharacterCreateProfile struct {
+	Name      string
+	Gender    protocol.Gender
+	HairStyle int
+	HairColor int
+	Skin      int
 }
 
 type CombatIndicatorKind int
@@ -266,8 +281,10 @@ type NearbyNPC struct {
 }
 
 // NPC idle and walk timings are tuned separately from character travel speed.
-const NpcIdleInterval = 6
-const NpcWalkDuration = 24
+const (
+	NpcIdleInterval = 6
+	NpcWalkDuration = 24
+)
 
 // StartWalk begins a walk from the current position to (destX, destY).
 // Matches the original client: X,Y is set to destination immediately.
@@ -393,9 +410,15 @@ type Client struct {
 	Inventory   []InventoryItem
 	Equipment   server.EquipmentPaperdoll
 
+	// Lookup callback set by the UI layer.
+	ItemTypeFunc func(int) int
+
 	// UI state
 	Username string
 	Password string
+
+	PendingAccountCreate   *AccountCreateProfile
+	PendingCharacterCreate *CharacterCreateProfile
 
 	// Events channel for UI updates
 	Events chan Event
@@ -408,6 +431,7 @@ const (
 	EventError
 	EventChat
 	EventCharacterList
+	EventAccountCreated
 	EventEnterGame
 	EventWarp
 )
@@ -416,6 +440,35 @@ type Event struct {
 	Type    EventType
 	Message string
 	Data    any
+}
+
+type ChatChannel int
+
+const (
+	ChatChannelMap ChatChannel = iota
+	ChatChannelGroup
+	ChatChannelGlobal
+	ChatChannelSystem
+)
+
+func (c ChatChannel) Label() string {
+	switch c {
+	case ChatChannelMap:
+		return "Map"
+	case ChatChannelGroup:
+		return "Group"
+	case ChatChannelGlobal:
+		return "Global"
+	case ChatChannelSystem:
+		return "System"
+	default:
+		return "Unknown"
+	}
+}
+
+type ChatMessage struct {
+	Channel ChatChannel
+	Text    string
 }
 
 type UISnapshot struct {
@@ -487,15 +540,15 @@ func (c *Client) UISnapshot() UISnapshot {
 	snapshot := UISnapshot{
 		PlayerID:    c.PlayerID,
 		Character:   c.Character,
-		Inventory:   append([]InventoryItem(nil), c.Inventory...),
-		NearbyChars: append([]NearbyCharacter(nil), c.NearbyChars...),
-		NearbyNpcs:  append([]NearbyNPC(nil), c.NearbyNpcs...),
-		NearbyItems: append([]NearbyItem(nil), c.NearbyItems...),
+		Inventory:   slices.Clone(c.Inventory),
+		NearbyChars: slices.Clone(c.NearbyChars),
+		NearbyNpcs:  slices.Clone(c.NearbyNpcs),
+		NearbyItems: slices.Clone(c.NearbyItems),
 	}
 	snapshot.Equipment = c.Equipment
-	snapshot.Equipment.Ring = append([]int(nil), c.Equipment.Ring...)
-	snapshot.Equipment.Armlet = append([]int(nil), c.Equipment.Armlet...)
-	snapshot.Equipment.Bracer = append([]int(nil), c.Equipment.Bracer...)
+	snapshot.Equipment.Ring = slices.Clone(c.Equipment.Ring)
+	snapshot.Equipment.Armlet = slices.Clone(c.Equipment.Armlet)
+	snapshot.Equipment.Bracer = slices.Clone(c.Equipment.Bracer)
 	return snapshot
 }
 
@@ -506,7 +559,9 @@ func (c *Client) Disconnect() {
 	c.mu.Unlock()
 
 	if bus != nil {
-		bus.Close()
+		if err := bus.Close(); err != nil {
+			slog.Debug("close packet bus", "err", err)
+		}
 	}
 	c.SetState(StateInitial)
 }

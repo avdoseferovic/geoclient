@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethanmoffat/eolib-go/v3/data"
 	"github.com/gorilla/websocket"
 )
 
@@ -72,9 +71,4 @@ func (c *Conn) WritePacket(buf []byte) error {
 // Close closes the underlying WebSocket connection.
 func (c *Conn) Close() error {
 	return c.ws.Close()
-}
-
-// encodeLength encodes a packet length using EO number encoding.
-func encodeLength(length int) []byte {
-	return data.EncodeNumber(length)
 }

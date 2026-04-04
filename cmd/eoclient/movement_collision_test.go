@@ -1,15 +1,24 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/avdo/eoweb/internal/movement"
+)
 
 func TestBlockedTileSpecMatchesReferenceWalkBlockers(t *testing.T) {
-	for _, spec := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26} {
-		if !blockedTileSpec(spec) {
-			t.Fatalf("blockedTileSpec(%d) = false, want true", spec)
+	for _, spec := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 16, 18, 19, 20, 21, 22, 23, 24, 25, 26} {
+		if !movement.BlockedTileSpec(spec) {
+			t.Fatalf("BlockedTileSpec(%d) = false, want true", spec)
 		}
 	}
-	if blockedTileSpec(0) {
-		t.Fatal("blockedTileSpec(0) = true, want false")
+	if movement.BlockedTileSpec(0) {
+		t.Fatal("BlockedTileSpec(0) = true, want false")
+	}
+	for _, spec := range []int{12, 13, 14, 15, 17, 27} {
+		if movement.BlockedTileSpec(spec) {
+			t.Fatalf("BlockedTileSpec(%d) = true, want false", spec)
+		}
 	}
 }
 

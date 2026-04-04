@@ -21,7 +21,7 @@ func NewHTTPReader(baseURL string) *HTTPReader {
 	}
 }
 
-func (r *HTTPReader) ReadFile(name string) ([]byte, error) {
+func (r *HTTPReader) ReadFile(name string) (data []byte, err error) {
 	client := r.Client
 	if client == nil {
 		client = http.DefaultClient
@@ -32,13 +32,18 @@ func (r *HTTPReader) ReadFile(name string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetch %s: %w", target, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		closeErr := resp.Body.Close()
+		if err == nil && closeErr != nil {
+			err = fmt.Errorf("close %s: %w", target, closeErr)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("fetch %s: unexpected status %s", target, resp.Status)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	data, err = io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", target, err)
 	}

@@ -54,7 +54,8 @@ func (g *Game) syncEntities() {
 		}
 		g.mapRenderer.Npcs = append(g.mapRenderer.Npcs, render.NpcEntity{
 			Index:      npc.Index,
-			GraphicID:  npc.ID,
+			ID:         npc.ID,
+			GraphicID:  g.npcGraphicID(npc.ID),
 			X:          rx,
 			Y:          ry,
 			DestX:      dx,
@@ -90,6 +91,15 @@ func (g *Game) groundItemGraphicID(item game.NearbyItem) int {
 		}
 	}
 	return item.GraphicID
+}
+
+func (g *Game) npcGraphicID(id int) int {
+	if g.npcDB != nil {
+		if graphicID := g.npcDB.GraphicID(id); graphicID > 0 {
+			return graphicID
+		}
+	}
+	return id
 }
 
 // characterFrame picks the correct animation frame based on direction and walk state.

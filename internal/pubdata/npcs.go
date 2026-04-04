@@ -9,8 +9,9 @@ import (
 )
 
 type NPCDef struct {
-	ID   int
-	Name string
+	ID        int
+	Name      string
+	GraphicID int
 }
 
 type NPCDB struct {
@@ -40,8 +41,9 @@ func LoadNPCDBFromBytes(raw []byte) (*NPCDB, error) {
 	for i, npc := range enf.Npcs {
 		id := i + 1
 		db.byID[id] = NPCDef{
-			ID:   id,
-			Name: npc.Name,
+			ID:        id,
+			Name:      npc.Name,
+			GraphicID: npc.GraphicId,
 		}
 	}
 	return db, nil
@@ -60,4 +62,11 @@ func (db *NPCDB) Name(id int) string {
 		return npc.Name
 	}
 	return ""
+}
+
+func (db *NPCDB) GraphicID(id int) int {
+	if npc, ok := db.Get(id); ok {
+		return npc.GraphicID
+	}
+	return 0
 }

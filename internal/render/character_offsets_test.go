@@ -17,28 +17,28 @@ func TestCharacterDrawPositionMatchesReferenceWalkingFemaleRight(t *testing.T) {
 	if drawX != 87 {
 		t.Fatalf("drawX = %v, want 87", drawX)
 	}
-	if drawY != 143.5 {
-		t.Fatalf("drawY = %v, want 143.5", drawY)
+	if drawY != 144 {
+		t.Fatalf("drawY = %v, want 144", drawY)
 	}
 }
 
 func TestNPCDrawPositionUsesReferenceFootAnchorAndMetadata(t *testing.T) {
 	drawX, drawY := NPCDrawPosition(27, false, 100, 200, 40, 64)
-	if drawX != 83 {
-		t.Fatalf("drawX = %v, want 83", drawX)
+	if drawX != 80 {
+		t.Fatalf("drawX = %v, want 80", drawX)
 	}
-	if drawY != 146 {
-		t.Fatalf("drawY = %v, want 146", drawY)
+	if drawY != 150 {
+		t.Fatalf("drawY = %v, want 150", drawY)
 	}
 }
 
 func TestNPCDrawPositionMirrorsHorizontalMetadata(t *testing.T) {
 	leftX, _ := NPCDrawPosition(27, false, 100, 200, 40, 64)
 	rightX, _ := NPCDrawPosition(27, true, 100, 200, 40, 64)
-	if leftX != 83 {
-		t.Fatalf("leftX = %v, want 83", leftX)
+	if leftX != 80 {
+		t.Fatalf("leftX = %v, want 80", leftX)
 	}
-	if rightX != 77 {
-		t.Fatalf("rightX = %v, want 77", rightX)
+	if rightX != 80 {
+		t.Fatalf("rightX = %v, want 80", rightX)
 	}
 }

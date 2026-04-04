@@ -1,7 +1,8 @@
 package render
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
@@ -9,12 +10,12 @@ import (
 type entityCmd struct {
 	x, y  int     // iso coords
 	depth float64 // for sorting
-	kind  int     // 0=item, 1=npc, 2=character
+	kind  int     // 0=item, 1=npc, 2=character, 3=cursor
 	index int     // index into the entity slice
 }
 
-// drawEntities renders all characters, NPCs, and items with correct isometric depth sorting.
-func (r *MapRenderer) drawEntities(screen *ebiten.Image, camSX, camSY, halfW, halfH float64) {
+// buildEntityDrawCmds collects renderable entities with the same depth model as the reference client.
+func (r *MapRenderer) buildEntityDrawCmds(screen *ebiten.Image, camSX, camSY, halfW, halfH float64) []entityCmd {
 	sw, sh := float64(screen.Bounds().Dx()), float64(screen.Bounds().Dy())
 	var ents []entityCmd
 
@@ -40,39 +41,103 @@ func (r *MapRenderer) drawEntities(screen *ebiten.Image, camSX, camSY, halfW, ha
 		ch := &r.Characters[i]
 		ents = append(ents, entityCmd{
 			x: ch.X, y: ch.Y,
-			depth: entityDepth(ch.X, ch.Y, 2),
+			depth: characterEntityDepth(ch),
 			kind:  2, index: i,
 		})
 	}
 
-	sort.Slice(ents, func(i, j int) bool {
-		return ents[i].depth < ents[j].depth
-	})
+	if r.Cursor != nil {
+		ents = append(ents, entityCmd{
+			x: r.Cursor.X, y: r.Cursor.Y,
+			depth: entityDepth(r.Cursor.X, r.Cursor.Y, 3),
+			kind:  3,
+		})
+	}
+	filtered := ents[:0]
 
 	for _, e := range ents {
 		sx, sy := IsoToScreen(float64(e.x), float64(e.y))
 		sx = sx - camSX + halfW
 		sy = sy - camSY + halfH
 
-		// Skip off-screen entities (generous bounds)
+		// Skip off-screen entities with generous bounds.
 		if sx < -200 || sx > sw+200 || sy < -200 || sy > sh+200 {
 			continue
 		}
+		filtered = append(filtered, e)
+	}
 
-		switch e.kind {
-		case 0:
-			RenderItem(screen, r.Loader, &r.Items[e.index], sx, sy)
-		case 1:
-			RenderNPC(screen, r.Loader, &r.Npcs[e.index], sx, sy)
-		case 2:
-			RenderCharacter(screen, r.Loader, &r.Characters[e.index], sx, sy)
-		}
+	slices.SortFunc(filtered, func(a, b entityCmd) int {
+		return cmp.Compare(a.depth, b.depth)
+	})
+
+	return filtered
+}
+
+func (r *MapRenderer) drawEntityCmd(screen *ebiten.Image, cmd entityCmd, camSX, camSY, halfW, halfH float64) {
+	sx, sy := IsoToScreen(float64(cmd.x), float64(cmd.y))
+	sx = sx - camSX + halfW
+	sy = sy - camSY + halfH
+
+	switch cmd.kind {
+	case 0:
+		RenderItem(screen, r.Loader, &r.Items[cmd.index], sx, sy)
+	case 1:
+		RenderNPC(screen, r.Loader, &r.Npcs[cmd.index], sx, sy)
+	case 2:
+		RenderCharacter(screen, r.Loader, &r.Characters[cmd.index], sx, sy)
+	case 3:
+		RenderCursor(screen, r.Loader, r.Cursor, sx, sy)
 	}
 }
 
-// entityDepth calculates depth for an entity at (x,y).
-// kind offsets: items < npcs < characters for same tile.
 func entityDepth(x, y, kind int) float64 {
-	row := float64(x + y)
-	return row*rdg + float64(kind)*tdg*3
+	baseDepth := entityBaseDepth(kind)
+	row := float64(y)*rdg + float64(x)*float64(worldDepthLayers)*tdg
+	return baseDepth + row
+}
+
+func entityBaseDepth(kind int) float64 {
+	switch kind {
+	case 0: // items
+		return 0.0 + tdg*3
+	case 1: // npcs
+		return 0.0 + tdg*6
+	case 2: // characters
+		return 0.0 + tdg*5
+	case 3: // cursor
+		return 0.0 + tdg*2
+	default:
+		return 0.0
+	}
+}
+
+func characterEntityDepth(ch *CharacterEntity) float64 {
+	if ch == nil || !ch.Walking {
+		return entityDepth(ch.X, ch.Y, 2)
+	}
+
+	ox, oy, dx, dy := walkVector(ch.Direction)
+	if dx == 0 && dy == 0 {
+		return entityDepth(ch.X, ch.Y, 2)
+	}
+
+	fx := float64(ch.X+ox) + float64(dx)*ch.WalkProg
+	fy := float64(ch.Y+oy) + float64(dy)*ch.WalkProg
+	return entityBaseDepth(2) + fy*rdg + fx*float64(worldDepthLayers)*tdg
+}
+
+func walkVector(dir int) (originDX, originDY, moveDX, moveDY int) {
+	switch dir {
+	case 0: // Down: destination is one tile below origin.
+		return 0, -1, 0, 1
+	case 1: // Left
+		return 1, 0, -1, 0
+	case 2: // Up
+		return 0, 1, 0, -1
+	case 3: // Right
+		return -1, 0, 1, 0
+	default:
+		return 0, 0, 0, 0
+	}
 }

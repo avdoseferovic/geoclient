@@ -5,7 +5,7 @@ import (
 	"image/color"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/text"
+	textv2 "github.com/hajimehoshi/ebiten/v2/text/v2"
 	"golang.org/x/image/font/basicfont"
 
 	"github.com/avdo/eoweb/internal/gfx"
@@ -50,6 +50,7 @@ type CharacterEntity struct {
 // NpcEntity represents an NPC to render on the map.
 type NpcEntity struct {
 	Index        int
+	ID           int
 	GraphicID    int
 	X, Y         int // origin position (during walk)
 	DestX, DestY int // walk destination
@@ -89,6 +90,11 @@ type ItemEntity struct {
 	UID       int
 	GraphicID int
 	X, Y      int
+}
+
+type CursorEntity struct {
+	X, Y int
+	Type int
 }
 
 // WalkOffset returns the pixel offset for a walking character based on direction and progress.
@@ -330,7 +336,22 @@ func renderHat(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, fr
 	}
 
 	offset := hatOffset(ch.Gender, frame)
-	renderAttachment(screen, img, bodyX, bodyY, charW, charH, offset, ch.Mirrored, true, 1.0, ch.HitProg)
+	x, y := hatDrawPosition(bodyX, bodyY, charW, charH, img.Bounds().Dx(), img.Bounds().Dy(), offset, ch.Mirrored)
+	renderImage(screen, img, x, y, ch.Mirrored, 1.0, ch.HitProg)
+}
+
+func hatDrawPosition(bodyX, bodyY float64, bodyW, bodyH, hatW, hatH int, offset attachmentOffset, mirrored bool) (float64, float64) {
+	// Hats are anchored against the full 100x100 character frame in the reference client,
+	// not against the cropped body sprite's top edge.
+	frameTopX := bodyX - float64(halfCharacterFrameSize) + float64(bodyW)/2
+	frameTopY := bodyY - float64(halfCharacterFrameSize) + float64(bodyH)/2
+	x := frameTopX + float64(halfCharacterFrameSize-hatW/2) + offset.X
+	y := frameTopY - float64(hatH)/2 + offset.Y
+	if mirrored {
+		attachmentRight := (x - bodyX) + float64(hatW)
+		x = bodyX + float64(bodyW) - attachmentRight
+	}
+	return x, y
 }
 
 func renderShield(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, frame CharacterFrame, bodyX, bodyY float64, charW, charH int) {
@@ -569,18 +590,49 @@ func RenderItem(screen *ebiten.Image, loader *gfx.Loader, item *ItemEntity, sx, 
 	screen.DrawImage(img, op)
 }
 
+func RenderCursor(screen *ebiten.Image, loader *gfx.Loader, cursor *CursorEntity, sx, sy float64) {
+	if cursor == nil || cursor.Type < 0 {
+		return
+	}
+
+	cursorImg, err := loader.GetImage(2, 24)
+	if err != nil || cursorImg == nil {
+		return
+	}
+
+	tw := TileWidth
+	th := TileHeight
+	srcX := cursor.Type * tw
+	if srcX+tw > cursorImg.Bounds().Dx() {
+		srcX = 0
+	}
+	sub := cursorImg.SubImage(image.Rect(srcX, 0, srcX+tw, th)).(*ebiten.Image)
+
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Translate(sx-float64(tw)/2, sy-float64(th)/2)
+	screen.DrawImage(sub, op)
+}
+
 func renderIndicators(screen *ebiten.Image, indicators []CombatIndicator, sx, baseY float64) {
 	if len(indicators) == 0 {
 		return
 	}
 
-	face := basicfont.Face7x13
+	face := textv2.NewGoXFace(basicfont.Face7x13)
+	ascent := float64(basicfont.Face7x13.Metrics().Ascent.Ceil())
 	for i := range indicators {
 		indicator := indicators[len(indicators)-1-i]
 		rise := indicator.Progress * 18
 		y := baseY - float64(i*14) - rise
 		x := sx - float64(len(indicator.Text)*7)/2
-		text.Draw(screen, indicator.Text, face, int(x), int(y), indicatorColor(indicator.Kind, indicator.Progress))
+		shadowOp := &textv2.DrawOptions{}
+		shadowOp.GeoM.Translate(x+1, y-ascent+1)
+		shadowOp.ColorScale.ScaleWithColor(color.NRGBA{A: 160})
+		textv2.Draw(screen, indicator.Text, face, shadowOp)
+		op := &textv2.DrawOptions{}
+		op.GeoM.Translate(x, y-ascent)
+		op.ColorScale.ScaleWithColor(indicatorColor(indicator.Kind, indicator.Progress))
+		textv2.Draw(screen, indicator.Text, face, op)
 	}
 }
 
@@ -741,32 +793,58 @@ func armorOffset(gender int, frame CharacterFrame) attachmentOffset {
 func hatOffset(gender int, frame CharacterFrame) attachmentOffset {
 	if gender == 0 {
 		switch frame {
+		case FrameChairDown:
+			return attachmentOffset{2, 24}
+		case FrameChairUp:
+			return attachmentOffset{3, 24}
+		case FrameFloorDown:
+			return attachmentOffset{2, 29}
+		case FrameFloorUp:
+			return attachmentOffset{4, 29}
+		case FrameRangeDown:
+			return attachmentOffset{6, 22}
+		case FrameRangeUp:
+			return attachmentOffset{4, 23}
 		case FrameMeleeDown1, FrameMeleeUp1:
-			return attachmentOffset{1, -6}
+			return attachmentOffset{1, 23}
 		case FrameMeleeDown2:
-			return attachmentOffset{-3, -1}
+			return attachmentOffset{-3, 28}
 		case FrameMeleeUp2:
-			return attachmentOffset{-3, -5}
+			return attachmentOffset{-3, 24}
 		case FrameRaisedDown, FrameRaisedUp:
-			return attachmentOffset{0, -4}
-		default:
-			return attachmentOffset{0, -6}
+			return attachmentOffset{0, 25}
+		case FrameStandDown, FrameStandUp, FrameWalkDown1, FrameWalkDown2, FrameWalkDown3, FrameWalkDown4,
+			FrameWalkUp1, FrameWalkUp2, FrameWalkUp3, FrameWalkUp4:
+			return attachmentOffset{0, 23}
 		}
+		return attachmentOffset{0, 23}
 	}
 
 	switch frame {
-	case FrameWalkDown1, FrameWalkDown2, FrameWalkDown3, FrameWalkDown4:
-		return attachmentOffset{1, -7}
+	case FrameChairDown, FrameChairUp:
+		return attachmentOffset{3, 25}
+	case FrameFloorDown:
+		return attachmentOffset{3, 30}
+	case FrameFloorUp:
+		return attachmentOffset{5, 30}
+	case FrameRangeDown:
+		return attachmentOffset{5, 22}
+	case FrameRangeUp:
+		return attachmentOffset{3, 22}
 	case FrameMeleeDown1, FrameMeleeUp1:
-		return attachmentOffset{2, -7}
+		return attachmentOffset{2, 22}
 	case FrameMeleeDown2:
-		return attachmentOffset{-4, -3}
+		return attachmentOffset{-4, 26}
 	case FrameMeleeUp2:
-		return attachmentOffset{-2, -6}
+		return attachmentOffset{-2, 23}
 	case FrameRaisedDown, FrameRaisedUp:
-		return attachmentOffset{0, -5}
+		return attachmentOffset{0, 24}
+	case FrameWalkDown1, FrameWalkDown2, FrameWalkDown3, FrameWalkDown4:
+		return attachmentOffset{1, 22}
+	case FrameStandDown, FrameStandUp, FrameWalkUp1, FrameWalkUp2, FrameWalkUp3, FrameWalkUp4:
+		return attachmentOffset{0, 22}
 	default:
-		return attachmentOffset{0, -7}
+		return attachmentOffset{0, 22}
 	}
 }
 

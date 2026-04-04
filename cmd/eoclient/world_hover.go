@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -10,6 +11,7 @@ import (
 	"github.com/avdo/eoweb/internal/game"
 	"github.com/avdo/eoweb/internal/render"
 	clientui "github.com/avdo/eoweb/internal/ui"
+	"github.com/avdo/eoweb/internal/ui/overlay"
 )
 
 type worldHoverKind int
@@ -61,13 +63,13 @@ func (g *Game) currentWorldHoverTarget(snapshot game.UISnapshot) (worldHoverTarg
 
 	for _, ch := range g.mapRenderer.Characters {
 		rect := characterHoverRect(ch, camSX, camSY, halfW, halfH)
-		if !pointInRect(mx, my, rect) {
+		if !overlay.PointInRect(mx, my, rect) {
 			continue
 		}
 
 		target := worldHoverTarget{
 			Kind:   worldHoverCharacter,
-			Title:  fallbackString(strings.TrimSpace(ch.Name), "Unknown adventurer"),
+			Title:  overlay.FallbackString(strings.TrimSpace(ch.Name), "Unknown adventurer"),
 			Anchor: image.Pt((rect.Min.X+rect.Max.X)/2, rect.Min.Y),
 			Depth:  rect.Max.Y,
 		}
@@ -79,13 +81,13 @@ func (g *Game) currentWorldHoverTarget(snapshot game.UISnapshot) (worldHoverTarg
 
 	for _, npc := range g.mapRenderer.Npcs {
 		rect := g.npcHoverRect(npc, camSX, camSY, halfW, halfH)
-		if !pointInRect(mx, my, rect) {
+		if !overlay.PointInRect(mx, my, rect) {
 			continue
 		}
 
-		name := strings.TrimSpace(g.npcLabel(npc.GraphicID))
+		name := strings.TrimSpace(g.npcLabel(npc.ID))
 		if name == "" {
-			name = fmt.Sprintf("NPC %03d", npc.GraphicID)
+			name = fmt.Sprintf("NPC %03d", npc.ID)
 		}
 		target := worldHoverTarget{
 			Kind:   worldHoverNPC,
@@ -104,7 +106,7 @@ func (g *Game) currentWorldHoverTarget(snapshot game.UISnapshot) (worldHoverTarg
 			continue
 		}
 		rect := g.itemHoverRect(item, camSX, camSY, halfW, halfH)
-		if !pointInRect(mx, my, rect) {
+		if !overlay.PointInRect(mx, my, rect) {
 			continue
 		}
 		itemID, amount := groundItemHoverData(snapshot, item.UID)
@@ -136,80 +138,40 @@ func groundItemHoverAllowed(intent worldHoverIntent, itemX, itemY int) bool {
 	return intent.CursorType == 2
 }
 
-func (g *Game) drawHoverTooltip(screen *ebiten.Image, theme clientui.Theme, mx, my int, title string, lines []string) {
-	title = strings.TrimSpace(title)
-	if title == "" {
-		return
-	}
-
-	filtered := make([]string, 0, len(lines))
-	width := clientui.MeasureText(title)
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		filtered = append(filtered, line)
-		if measure := clientui.MeasureText(line); measure > width {
-			width = measure
-		}
-	}
-
-	rectW := width + 24
-	rectH := 28 + 16 + len(filtered)*14 + 10
-	x := mx + 16
-	y := my + 18
-	if x+rectW > g.screenW-8 {
-		x = mx - rectW - 12
-	}
-	if y+rectH > g.screenH-8 {
-		y = my - rectH - 12
-	}
-	if x < 8 {
-		x = 8
-	}
-	if y < 8 {
-		y = 8
-	}
-
-	rect := image.Rect(x, y, x+rectW, y+rectH)
-	clientui.DrawPanel(screen, rect, theme, clientui.PanelOptions{Accent: theme.AccentMuted})
-	clientui.DrawText(screen, title, rect.Min.X+12, rect.Min.Y+18, theme.Text)
-	for i, line := range filtered {
-		clientui.DrawText(screen, line, rect.Min.X+12, rect.Min.Y+38+i*14, theme.TextDim)
-	}
-}
-
 func (g *Game) drawWorldNameplate(screen *ebiten.Image, theme clientui.Theme, target worldHoverTarget) {
 	title := strings.TrimSpace(target.Title)
 	if title == "" {
 		return
 	}
 
-	x := target.Anchor.X - clientui.MeasureText(title)/2
+	textW := clientui.MeasureText(title)
+	x := target.Anchor.X - textW/2
 	y := target.Anchor.Y - 2
 	if x < 8 {
 		x = 8
 	}
-	if x+clientui.MeasureText(title) > g.screenW-8 {
-		x = g.screenW - 8 - clientui.MeasureText(title)
+	if x+textW > g.screenW-8 {
+		x = g.screenW - 8 - textW
 	}
 	if y < 12 {
 		y = 12
 	}
+	plateRect := image.Rect(x-6, y-12, x+textW+6, y+4)
+	clientui.FillRect(screen, float64(plateRect.Min.X), float64(plateRect.Min.Y), float64(plateRect.Dx()), float64(plateRect.Dy()), color.NRGBA{A: 140})
+	clientui.DrawText(screen, title, x+1, y+1, color.NRGBA{A: 180})
 	clientui.DrawText(screen, title, x, y, theme.Text)
 }
 
 func (g *Game) worldHoverBlockedByHUD(mx, my int) bool {
-	layout := inGameHUDLayout(g.screenW, g.screenH)
+	layout := overlay.InGameHUDLayout(g.screenW, g.screenH)
 	chatPanelRect, _ := g.chatRects()
-	if pointInRect(mx, my, chatPanelRect) ||
-		pointInRect(mx, my, layout.statusRect) ||
-		pointInRect(mx, my, layout.menuRect) ||
-		pointInRect(mx, my, layout.infoRect) {
+	if overlay.PointInRect(mx, my, chatPanelRect) ||
+		overlay.PointInRect(mx, my, layout.StatusRect) ||
+		overlay.PointInRect(mx, my, layout.MenuRect) ||
+		overlay.PointInRect(mx, my, layout.InfoRect) {
 		return true
 	}
-	return g.overlay.activeMenuPanel != gameMenuPanelNone && pointInRect(mx, my, layout.menuPanelRect)
+	return g.overlay.activeMenuPanel != overlay.MenuPanelNone && overlay.PointInRect(mx, my, layout.MenuPanelRect)
 }
 
 func characterHoverRect(ch render.CharacterEntity, camSX, camSY, halfW, halfH float64) image.Rectangle {

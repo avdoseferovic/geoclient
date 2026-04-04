@@ -7,8 +7,6 @@ import (
 	"sync"
 	"syscall/js"
 	"time"
-
-	"github.com/ethanmoffat/eolib-go/v3/data"
 )
 
 const writeDeadline = 10 * time.Second
@@ -165,9 +163,4 @@ func (c *Conn) releaseCallbacks() {
 		callback.Release()
 	}
 	c.callbacks = nil
-}
-
-// encodeLength encodes a packet length using EO number encoding.
-func encodeLength(length int) []byte {
-	return data.EncodeNumber(length)
 }

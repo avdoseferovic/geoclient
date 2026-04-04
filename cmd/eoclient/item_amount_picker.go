@@ -1,0 +1,126 @@
+package main
+
+import (
+	"image"
+	"strconv"
+
+	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
+
+	clientui "github.com/avdo/eoweb/internal/ui"
+	"github.com/avdo/eoweb/internal/ui/overlay"
+)
+
+type itemAmountPickerState struct {
+	Active bool
+	ItemID int
+	Max    int
+	TileX  int
+	TileY  int
+
+	Input    string
+	inputBuf []rune
+}
+
+func (g *Game) openItemAmountPicker(itemID, maxAmount, tileX, tileY int) {
+	if maxAmount <= 1 {
+		return
+	}
+	input := strconv.Itoa(maxAmount)
+	g.overlay.itemAmountPicker = itemAmountPickerState{
+		Active:   true,
+		ItemID:   itemID,
+		Max:      maxAmount,
+		TileX:    tileX,
+		TileY:    tileY,
+		Input:    input,
+		inputBuf: []rune(input),
+	}
+}
+
+func (g *Game) closeItemAmountPicker() {
+	g.overlay.itemAmountPicker = itemAmountPickerState{}
+}
+
+func (g *Game) updateItemAmountPicker() bool {
+	if !g.overlay.itemAmountPicker.Active {
+		return false
+	}
+
+	picker := &g.overlay.itemAmountPicker
+
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.closeItemAmountPicker()
+		return true
+	}
+
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
+		amount := g.itemAmountPickerValue()
+		if amount <= 0 {
+			g.overlay.statusMessage = "Enter a valid amount"
+			return true
+		}
+		g.sendDropItem(picker.ItemID, amount, picker.TileX, picker.TileY)
+		g.overlay.statusMessage = "Dropped item"
+		g.closeItemAmountPicker()
+		return true
+	}
+
+	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) && len(picker.inputBuf) > 0 {
+		picker.inputBuf = picker.inputBuf[:len(picker.inputBuf)-1]
+		picker.Input = string(picker.inputBuf)
+		return true
+	}
+
+	for _, r := range ebiten.AppendInputChars(nil) {
+		if r < '0' || r > '9' {
+			continue
+		}
+		if len(picker.inputBuf) >= len(strconv.Itoa(picker.Max)) {
+			continue
+		}
+		if len(picker.inputBuf) == 1 && picker.inputBuf[0] == '0' {
+			picker.inputBuf = picker.inputBuf[:0]
+		}
+		picker.inputBuf = append(picker.inputBuf, r)
+		picker.Input = string(picker.inputBuf)
+	}
+	return true
+}
+
+func (g *Game) itemAmountPickerValue() int {
+	picker := g.overlay.itemAmountPicker
+	if !picker.Active || picker.Input == "" {
+		return 0
+	}
+	value, err := strconv.Atoi(picker.Input)
+	if err != nil || value <= 0 {
+		return 0
+	}
+	if value > picker.Max {
+		return picker.Max
+	}
+	return value
+}
+
+func (g *Game) drawItemAmountPicker(screen *ebiten.Image, theme clientui.Theme) {
+	if !g.overlay.itemAmountPicker.Active {
+		return
+	}
+
+	rect := overlay.CenteredRect(280, 132, g.screenW, g.screenH)
+	clientui.DrawPanel(screen, rect, theme, clientui.PanelOptions{Title: "Drop Amount", Accent: theme.Accent})
+
+	picker := g.overlay.itemAmountPicker
+	clientui.DrawTextCentered(screen, "How many items?", image.Rect(rect.Min.X+12, rect.Min.Y+30, rect.Max.X-12, rect.Min.Y+50), theme.Text)
+	clientui.DrawTextCentered(screen, "Type a number and press Enter", image.Rect(rect.Min.X+12, rect.Min.Y+48, rect.Max.X-12, rect.Min.Y+66), theme.TextDim)
+
+	inputRect := image.Rect(rect.Min.X+54, rect.Min.Y+72, rect.Max.X-54, rect.Min.Y+98)
+	clientui.DrawInset(screen, inputRect, theme, true)
+	value := picker.Input
+	if value == "" {
+		value = "0"
+	}
+	clientui.DrawTextCentered(screen, value, inputRect, theme.Text)
+	clientui.DrawTextCentered(screen, "Esc cancels", image.Rect(rect.Min.X+12, rect.Max.Y-24, rect.Max.X-12, rect.Max.Y-10), theme.TextDim)
+}

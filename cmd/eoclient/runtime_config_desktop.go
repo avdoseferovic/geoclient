@@ -23,7 +23,7 @@ func loadRuntimeConfig() runtimeConfig {
 		layoutPath:    "inventory-layout.json",
 		assetReader:   assets.NewOSReader(),
 		windowTitle:   "EO Client",
-		defaultWidth:  640,
-		defaultHeight: 480,
+		defaultWidth:  960,
+		defaultHeight: 640,
 	}
 }

@@ -81,3 +81,38 @@ func TestHairGraphicIDs(t *testing.T) {
 		t.Fatalf("unexpected hair graphic ids: got %d %d %d %d", behindDown, frontDown, behindUp, frontUp)
 	}
 }
+
+func TestHatOffsetMatchesReference(t *testing.T) {
+	tests := []struct {
+		name   string
+		gender int
+		frame  CharacterFrame
+		wantX  float64
+		wantY  float64
+	}{
+		{name: "female stand down", gender: 0, frame: FrameStandDown, wantX: 0, wantY: 23},
+		{name: "female melee down 2", gender: 0, frame: FrameMeleeDown2, wantX: -3, wantY: 28},
+		{name: "male stand down", gender: 1, frame: FrameStandDown, wantX: 0, wantY: 22},
+		{name: "male walk down", gender: 1, frame: FrameWalkDown1, wantX: 1, wantY: 22},
+		{name: "male melee up 2", gender: 1, frame: FrameMeleeUp2, wantX: -2, wantY: 23},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hatOffset(tt.gender, tt.frame)
+			if got.X != tt.wantX || got.Y != tt.wantY {
+				t.Fatalf("hatOffset(%d, %v) = {%v, %v}, want {%v, %v}", tt.gender, tt.frame, got.X, got.Y, tt.wantX, tt.wantY)
+			}
+		})
+	}
+}
+
+func TestHatDrawPositionAnchorsToCharacterFrame(t *testing.T) {
+	x, y := hatDrawPosition(91, 146, CharWidth, CharHeight, 30, 40, attachmentOffset{X: 0, Y: 22}, false)
+	if x != 85 {
+		t.Fatalf("x = %v, want 85", x)
+	}
+	if y != 147 {
+		t.Fatalf("y = %v, want 147", y)
+	}
+}
