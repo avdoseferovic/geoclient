@@ -11,6 +11,7 @@ const (
 	MenuPanelMap
 	MenuPanelGuild
 	MenuPanelParty
+	MenuPanelOnline
 )
 
 type HUDLayout struct {
@@ -61,6 +62,7 @@ func HUDMenuButtons(layout HUDLayout) []HUDMenuButton {
 		{panel: MenuPanelMap, label: "Map"},
 		{panel: MenuPanelGuild, label: "Doll"},
 		{panel: MenuPanelParty, label: "Party"},
+		{panel: MenuPanelOnline, label: "Online"},
 	}
 	buttons := make([]HUDMenuButton, 0, len(panels))
 	for i, entry := range panels {

@@ -134,6 +134,25 @@ type TradeState struct {
 	PartnerAgreed bool
 }
 
+type ShopTradeItem struct {
+	ItemID       int
+	BuyPrice     int
+	SellPrice    int
+	MaxBuyAmount int
+}
+
+type ShopCraftItem struct {
+	ItemID      int
+	Ingredients []eonet.CharItem
+}
+
+type ShopState struct {
+	Open       bool
+	Name       string
+	TradeItems []ShopTradeItem
+	CraftItems []ShopCraftItem
+}
+
 type AccountCreateProfile struct {
 	FullName string
 	Location string
@@ -447,6 +466,9 @@ type Client struct {
 	Inventory   []InventoryItem
 	Equipment   server.EquipmentPaperdoll
 
+	// Door state
+	Doors []Door
+
 	// Chest state
 	ChestItems []ChestItem
 	ChestOpen  bool
@@ -457,6 +479,12 @@ type Client struct {
 
 	// Trade state
 	Trade TradeState
+
+	// Shop state
+	Shop ShopState
+
+	// Online players
+	OnlinePlayers []OnlinePlayer
 
 	// Lookup callback set by the UI layer.
 	ItemTypeFunc func(int) int
@@ -493,7 +521,9 @@ const (
 	EventTradeOpened
 	EventTradeClosed
 	EventTradeUpdated
+	EventShopOpened
 	EventPartyUpdated
+	EventOnlinePlayers
 )
 
 type Event struct {
@@ -540,6 +570,7 @@ type UISnapshot struct {
 	NearbyChars  []NearbyCharacter
 	NearbyNpcs   []NearbyNPC
 	NearbyItems  []NearbyItem
+	Shop         ShopState
 }
 
 func NewClient() *Client {
@@ -631,8 +662,28 @@ func (c *Client) UISnapshot() UISnapshot {
 	snapshot.Equipment.Ring = slices.Clone(c.Equipment.Ring)
 	snapshot.Equipment.Armlet = slices.Clone(c.Equipment.Armlet)
 	snapshot.Equipment.Bracer = slices.Clone(c.Equipment.Bracer)
+	snapshot.Shop = ShopState{
+		Open:       c.Shop.Open,
+		Name:       c.Shop.Name,
+		TradeItems: slices.Clone(c.Shop.TradeItems),
+		CraftItems: cloneShopCraftItems(c.Shop.CraftItems),
+	}
 	c.snapshotCache = snapshot
 	return snapshot
+}
+
+func cloneShopCraftItems(items []ShopCraftItem) []ShopCraftItem {
+	if len(items) == 0 {
+		return nil
+	}
+	cloned := make([]ShopCraftItem, len(items))
+	for i, item := range items {
+		cloned[i] = ShopCraftItem{
+			ItemID:      item.ItemID,
+			Ingredients: slices.Clone(item.Ingredients),
+		}
+	}
+	return cloned
 }
 
 func (c *Client) Disconnect() {
@@ -640,6 +691,7 @@ func (c *Client) Disconnect() {
 	bus := c.Bus
 	inTrade := c.Trade.State != TradeStateNone
 	c.Trade = TradeState{}
+	c.Shop = ShopState{}
 	c.Bus = nil
 	c.mu.Unlock()
 

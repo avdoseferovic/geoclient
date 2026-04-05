@@ -13,6 +13,7 @@ const (
 	QueuedActionNone QueuedWorldAction = iota
 	QueuedActionPickupItem
 	QueuedActionFaceTile
+	QueuedActionOpenShop
 )
 
 // MaxAutoWalkVisitedTiles caps BFS search to prevent unbounded exploration.
@@ -25,6 +26,7 @@ type AutoWalkPlan struct {
 	Action     QueuedWorldAction
 	ActionTile TileCoord
 	ItemUID    int
+	NpcIndex   int
 }
 
 // CanStepFunc is called by the pathfinder to check if a tile is walkable.

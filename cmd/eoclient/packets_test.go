@@ -102,3 +102,53 @@ func TestSendDropItemUsesExplicitCoords(t *testing.T) {
 		t.Fatalf("drop coords = (%d, %d), want (11, 13)", sent.Coords.X, sent.Coords.Y)
 	}
 }
+
+func TestSendShopPacketsUseSessionID(t *testing.T) {
+	conn := &fakePacketConn{}
+	bus := internalnet.NewPacketBus(conn)
+	c := game.NewClient()
+	c.SetBus(bus)
+	c.SessionID = 77
+
+	g := &Game{client: c}
+	g.sendShopOpen(8)
+	g.sendShopBuy(5, 2)
+	g.sendShopSell(6, 3)
+	g.sendShopCraft(9)
+
+	if len(conn.writes) != 4 {
+		t.Fatalf("writes = %d, want 4", len(conn.writes))
+	}
+
+	var open client.ShopOpenClientPacket
+	if err := open.Deserialize(data.NewEoReader(conn.writes[0][5:])); err != nil {
+		t.Fatalf("deserialize open packet: %v", err)
+	}
+	if open.NpcIndex != 8 {
+		t.Fatalf("open npc index = %d, want 8", open.NpcIndex)
+	}
+
+	var buy client.ShopBuyClientPacket
+	if err := buy.Deserialize(data.NewEoReader(conn.writes[1][5:])); err != nil {
+		t.Fatalf("deserialize buy packet: %v", err)
+	}
+	if buy.BuyItem.Id != 5 || buy.BuyItem.Amount != 2 || buy.SessionId != 77 {
+		t.Fatalf("buy packet = %#v", buy)
+	}
+
+	var sell client.ShopSellClientPacket
+	if err := sell.Deserialize(data.NewEoReader(conn.writes[2][5:])); err != nil {
+		t.Fatalf("deserialize sell packet: %v", err)
+	}
+	if sell.SellItem.Id != 6 || sell.SellItem.Amount != 3 || sell.SessionId != 77 {
+		t.Fatalf("sell packet = %#v", sell)
+	}
+
+	var craft client.ShopCreateClientPacket
+	if err := craft.Deserialize(data.NewEoReader(conn.writes[3][5:])); err != nil {
+		t.Fatalf("deserialize craft packet: %v", err)
+	}
+	if craft.CraftItemId != 9 || craft.SessionId != 77 {
+		t.Fatalf("craft packet = %#v", craft)
+	}
+}

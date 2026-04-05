@@ -16,6 +16,7 @@ import (
 	"github.com/avdo/eoweb/internal/pubdata"
 	"github.com/avdo/eoweb/internal/render"
 	"github.com/avdo/eoweb/internal/ui/overlay"
+	"github.com/ethanmoffat/eolib-go/v3/protocol/pub"
 )
 
 func main() {
@@ -284,7 +285,19 @@ func (g *Game) handleInGameLeftClick() bool {
 	}
 
 	if hover.CursorType == 1 {
+		if npc, ok := g.findNPCAtTile(hover.TileX, hover.TileY); ok && g.isShopNPC(npc.ID) {
+			if movement.IsAdjacentTile(g.client.Character.X, g.client.Character.Y, hover.TileX, hover.TileY) {
+				g.sendShopOpen(npc.Index)
+				return true
+			}
+			return g.queueAutoWalkToShop(npc.Index, hover.TileX, hover.TileY)
+		}
 		if movement.IsAdjacentTile(g.client.Character.X, g.client.Character.Y, hover.TileX, hover.TileY) {
+			// Check if it's a door tile — open it
+			if g.isDoorTile(hover.TileX, hover.TileY) {
+				g.sendDoorOpen(hover.TileX, hover.TileY)
+				return true
+			}
 			// Check if it's a chest tile (spec 9) — open it
 			if g.tileSpecAt(hover.TileX, hover.TileY) == 9 {
 				g.sendChestOpen(hover.TileX, hover.TileY)
@@ -301,6 +314,31 @@ func (g *Game) handleInGameLeftClick() bool {
 		return false
 	}
 	return g.queueAutoWalkToTile(hover.TileX, hover.TileY)
+}
+
+func (g *Game) findNPCAtTile(tileX, tileY int) (game.NearbyNPC, bool) {
+	for _, npc := range g.client.NearbyNpcs {
+		if npc.Dead || npc.Hidden {
+			continue
+		}
+		if npc.X == tileX && npc.Y == tileY {
+			return npc, true
+		}
+	}
+	return game.NearbyNPC{}, false
+}
+
+func (g *Game) isShopNPC(npcID int) bool {
+	return g.npcDB != nil && g.npcDB.Type(npcID) == pub.Npc_Shop
+}
+
+func (g *Game) tryOpenShopAt(tileX, tileY int) bool {
+	npc, ok := g.findNPCAtTile(tileX, tileY)
+	if !ok || !g.isShopNPC(npc.ID) || !movement.IsAdjacentTile(g.client.Character.X, g.client.Character.Y, tileX, tileY) {
+		return false
+	}
+	g.sendShopOpen(npc.Index)
+	return true
 }
 
 func (g *Game) currentWorldHoverIntent() worldHoverIntent {
@@ -321,6 +359,27 @@ func (g *Game) loadCurrentMap() {
 	if err := g.mapRenderer.LoadMap(mapPath); err != nil {
 		slog.Error("failed to load map", "path", mapPath, "err", err)
 	}
+	g.loadDoors()
+}
+
+func (g *Game) loadDoors() {
+	if g.mapRenderer.Map == nil {
+		g.client.LoadDoors(nil)
+		return
+	}
+	var doors []game.Door
+	for _, row := range g.mapRenderer.Map.WarpRows {
+		for _, tile := range row.Tiles {
+			if tile.Warp.Door > 0 {
+				doors = append(doors, game.Door{
+					X:   tile.X,
+					Y:   row.Y,
+					Key: tile.Warp.Door,
+				})
+			}
+		}
+	}
+	g.client.LoadDoors(doors)
 }
 
 func (g *Game) drawWorld(screen *ebiten.Image) {

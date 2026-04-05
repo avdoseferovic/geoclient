@@ -12,10 +12,22 @@ type NPCDef struct {
 	ID        int
 	Name      string
 	GraphicID int
+	Type      pub.NpcType
 }
 
 type NPCDB struct {
 	byID map[int]NPCDef
+}
+
+func NewNPCDB(defs ...NPCDef) *NPCDB {
+	db := &NPCDB{byID: make(map[int]NPCDef, len(defs))}
+	for _, def := range defs {
+		if def.ID <= 0 {
+			continue
+		}
+		db.byID[def.ID] = def
+	}
+	return db
 }
 
 func LoadNPCDB(path string) (*NPCDB, error) {
@@ -44,6 +56,7 @@ func LoadNPCDBFromBytes(raw []byte) (*NPCDB, error) {
 			ID:        id,
 			Name:      npc.Name,
 			GraphicID: npc.GraphicId,
+			Type:      npc.Type,
 		}
 	}
 	return db, nil
@@ -69,4 +82,11 @@ func (db *NPCDB) GraphicID(id int) int {
 		return npc.GraphicID
 	}
 	return 0
+}
+
+func (db *NPCDB) Type(id int) pub.NpcType {
+	if npc, ok := db.Get(id); ok {
+		return npc.Type
+	}
+	return pub.Npc_Friendly
 }

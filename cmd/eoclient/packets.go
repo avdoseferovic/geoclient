@@ -361,6 +361,28 @@ func (g *Game) sendPartyRemove(playerID int) {
 	}
 }
 
+func (g *Game) sendPlayersRequest() {
+	bus := g.client.GetBus()
+	if bus == nil {
+		return
+	}
+	if err := bus.SendSequenced(&client.PlayersRequestClientPacket{}); err != nil {
+		slog.Error("send players request failed", "err", err)
+	}
+}
+
+func (g *Game) sendDoorOpen(x, y int) {
+	bus := g.client.GetBus()
+	if bus == nil {
+		return
+	}
+	if err := bus.SendSequenced(&client.DoorOpenClientPacket{
+		Coords: eoproto.Coords{X: x, Y: y},
+	}); err != nil {
+		slog.Error("send door open failed", "err", err)
+	}
+}
+
 func (g *Game) sendChestOpen(x, y int) {
 	bus := g.client.GetBus()
 	if bus == nil {
@@ -396,6 +418,55 @@ func (g *Game) sendChestAdd(x, y, itemID, amount int) {
 		AddItem: eonet.ThreeItem{Id: itemID, Amount: amount},
 	}); err != nil {
 		slog.Error("send chest add failed", "err", err)
+	}
+}
+
+func (g *Game) sendShopOpen(npcIndex int) {
+	bus := g.client.GetBus()
+	if bus == nil || npcIndex <= 0 {
+		return
+	}
+	if err := bus.SendSequenced(&client.ShopOpenClientPacket{NpcIndex: npcIndex}); err != nil {
+		slog.Error("send shop open failed", "npcIndex", npcIndex, "err", err)
+	}
+}
+
+func (g *Game) sendShopBuy(itemID, amount int) {
+	bus := g.client.GetBus()
+	if bus == nil || itemID <= 0 || amount <= 0 {
+		return
+	}
+	if err := bus.SendSequenced(&client.ShopBuyClientPacket{
+		BuyItem:   eonet.Item{Id: itemID, Amount: amount},
+		SessionId: g.client.SessionID,
+	}); err != nil {
+		slog.Error("send shop buy failed", "itemID", itemID, "amount", amount, "err", err)
+	}
+}
+
+func (g *Game) sendShopSell(itemID, amount int) {
+	bus := g.client.GetBus()
+	if bus == nil || itemID <= 0 || amount <= 0 {
+		return
+	}
+	if err := bus.SendSequenced(&client.ShopSellClientPacket{
+		SellItem:  eonet.Item{Id: itemID, Amount: amount},
+		SessionId: g.client.SessionID,
+	}); err != nil {
+		slog.Error("send shop sell failed", "itemID", itemID, "amount", amount, "err", err)
+	}
+}
+
+func (g *Game) sendShopCraft(itemID int) {
+	bus := g.client.GetBus()
+	if bus == nil || itemID <= 0 {
+		return
+	}
+	if err := bus.SendSequenced(&client.ShopCreateClientPacket{
+		CraftItemId: itemID,
+		SessionId:   g.client.SessionID,
+	}); err != nil {
+		slog.Error("send shop craft failed", "itemID", itemID, "err", err)
 	}
 }
 

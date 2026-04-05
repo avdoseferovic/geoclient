@@ -55,6 +55,11 @@ func (g *Game) stepToward(dir int) bool {
 	}
 	nextX, nextY := movement.NextTileInDirection(g.client.Character.X, g.client.Character.Y, dir)
 	if !g.canArrowStepTo(nextX, nextY, dir) {
+		// Walking into a closed door opens it
+		if g.isDoorTile(nextX, nextY) && !g.client.IsDoorOpen(nextX, nextY) {
+			g.sendDoorOpen(nextX, nextY)
+			return g.faceOnly(dir)
+		}
 		return g.faceOnly(dir)
 	}
 	if g.facingDir != dir {
@@ -110,6 +115,8 @@ func (g *Game) startLocalWalk(dir int) {
 func (g *Game) tickAnimations() {
 	g.client.Lock()
 	defer g.client.Unlock()
+
+	g.client.TickDoors()
 
 	for i := range g.client.NearbyChars {
 		ch := &g.client.NearbyChars[i]
@@ -185,7 +192,10 @@ func (g *Game) stepBlockerAt(tileX, tileY int) stepBlocker {
 		return stepBlockerTile
 	}
 	if movement.BlockedTileSpec(g.tileSpecAt(tileX, tileY)) {
-		return stepBlockerTile
+		// Open doors are walkable even though the warp tile spec blocks
+		if !g.client.IsDoorOpen(tileX, tileY) {
+			return stepBlockerTile
+		}
 	}
 	for _, npc := range g.client.NearbyNpcs {
 		if npc.Dead || npc.Hidden {
@@ -206,6 +216,10 @@ func (g *Game) stepBlockerAt(tileX, tileY int) stepBlocker {
 	return stepBlockerNone
 }
 
+func (g *Game) isDoorTile(tileX, tileY int) bool {
+	return g.client.GetDoor(tileX, tileY) != nil
+}
+
 func (g *Game) tileSpecAt(tileX, tileY int) int {
 	if g.mapRenderer.Map == nil {
 		return -1
@@ -224,22 +238,6 @@ func (g *Game) tileSpecAt(tileX, tileY int) int {
 }
 
 func (g *Game) isAttackTargetTile(tileX, tileY int) bool {
-	for _, ch := range g.client.NearbyChars {
-		if ch.PlayerID == g.client.PlayerID {
-			continue
-		}
-		if ch.X == tileX && ch.Y == tileY {
-			return true
-		}
-	}
-	for _, npc := range g.client.NearbyNpcs {
-		if npc.Dead || npc.Hidden {
-			continue
-		}
-		if npc.X == tileX && npc.Y == tileY {
-			return true
-		}
-	}
 	return false
 }
 
@@ -248,6 +246,10 @@ func (g *Game) getCursorType(tileX, tileY int) int {
 	// Wall (0) and Edge (18) hide the cursor entirely
 	if spec == 0 || spec == 18 {
 		return -1
+	}
+	// Closed doors show as interaction targets
+	if g.isDoorTile(tileX, tileY) && !g.client.IsDoorOpen(tileX, tileY) {
+		return 1
 	}
 	if movement.BlockedTileSpec(spec) {
 		return 1

@@ -33,6 +33,9 @@ func (g *Game) handleInGameOverlayClick() bool {
 			g.overlay.activeMenuPanel = overlay.MenuPanelNone
 		} else {
 			g.overlay.activeMenuPanel = button.Panel
+			if button.Panel == overlay.MenuPanelOnline {
+				g.sendPlayersRequest()
+			}
 		}
 		return true
 	}

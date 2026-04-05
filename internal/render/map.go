@@ -39,6 +39,10 @@ type MapRenderer struct {
 	// Screen-space camera offset (for smooth walk animation)
 	CamOffX, CamOffY float64
 
+	// Open doors: key is [x, y], value is true when open.
+	// Set by the game layer each frame before Draw.
+	OpenDoors map[[2]int]bool
+
 	// Entities to render
 	Characters []CharacterEntity
 	Npcs       []NpcEntity
@@ -211,6 +215,11 @@ func (r *MapRenderer) buildDrawState(screen *ebiten.Image) mapDrawState {
 				graphicID := tile.Graphic
 				if graphicID == 0 {
 					continue
+				}
+
+				// Open doors use the next graphic ID (+1) on wall layers
+				if (layerIdx == 3 || layerIdx == 4) && r.OpenDoors != nil && r.OpenDoors[[2]int{x, y}] {
+					graphicID++
 				}
 
 				img, err := r.Loader.GetImage(gfxFileID, graphicID)

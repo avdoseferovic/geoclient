@@ -38,6 +38,7 @@ type overlayState struct {
 	activeMenuPanel     overlay.MenuPanel
 	chestDialogOpen     bool
 	tradeDialogOpen     bool
+	shopDialogOpen      bool
 	partyInviteOpen     bool
 	contextMenuOpen     bool
 	contextMenuX        int
@@ -49,6 +50,7 @@ type overlayState struct {
 	inventoryPage       int
 	lastClickItem       int
 	lastClickTick       int
+	shopTab             int
 	itemAmountPicker    itemAmountPickerState
 }
 
@@ -107,6 +109,9 @@ func (g *Game) drawOverlayScreen(screen *ebiten.Image) {
 		}
 		if g.overlay.tradeDialogOpen {
 			g.drawTradeDialog(screen, theme)
+		}
+		if g.overlay.shopDialogOpen {
+			g.drawShopDialog(screen, theme)
 		}
 		if g.overlay.partyInviteOpen {
 			g.drawPartyInviteDialog(screen, theme)
@@ -177,6 +182,8 @@ func (g *Game) drawActiveHUDPanel(screen *ebiten.Image, theme clientui.Theme, re
 		hud.DrawPaperdoll(screen, theme, rect, snapshot, g.drawItemSlot, g.drawItemTooltip)
 	case overlay.MenuPanelParty:
 		g.drawPartyPanel(screen, theme, rect)
+	case overlay.MenuPanelOnline:
+		g.drawOnlinePanel(screen, theme, rect)
 	default:
 		title, lines := g.activeHUDPanelContent(snapshot)
 		clientui.DrawPanel(screen, rect, theme, clientui.PanelOptions{Title: title, Accent: theme.AccentMuted})

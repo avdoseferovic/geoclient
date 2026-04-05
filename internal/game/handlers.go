@@ -69,9 +69,12 @@ func RegisterAllHandlers(reg *HandlerRegistry) {
 	// Entity handlers registered separately
 	RegisterEntityHandlers(reg)
 	RegisterStatSkillHandlers(reg)
+	RegisterDoorHandlers(reg)
+	RegisterPlayersHandlers(reg)
 	RegisterChestHandlers(reg)
 	RegisterPartyHandlers(reg)
 	RegisterTradeHandlers(reg)
+	RegisterShopHandlers(reg)
 }
 
 func emitChat(c *Client, channel ChatChannel, text string) {
@@ -117,6 +120,8 @@ func handleInitInit(c *Client, reader *data.EoReader) error {
 		c.Version = d.Version
 		slog.Info("server requested version update", "version", d.Version)
 		return nil
+	case server.InitReply_PlayersList:
+		return handleInitPlayersList(c, pkt.ReplyCodeData.(*server.InitInitReplyCodeDataPlayersList))
 	case server.InitReply_Banned:
 		c.Emit(Event{Type: EventError, Message: "You are banned from this server"})
 		return nil

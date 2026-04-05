@@ -10,6 +10,19 @@ func (g *Game) syncEntities() {
 	g.client.Lock()
 	defer g.client.Unlock()
 
+	// Sync open door state for rendering
+	if g.mapRenderer.OpenDoors == nil {
+		g.mapRenderer.OpenDoors = make(map[[2]int]bool)
+	}
+	for k := range g.mapRenderer.OpenDoors {
+		delete(g.mapRenderer.OpenDoors, k)
+	}
+	for _, d := range g.client.Doors {
+		if d.Open {
+			g.mapRenderer.OpenDoors[[2]int{d.X, d.Y}] = true
+		}
+	}
+
 	g.mapRenderer.Characters = g.mapRenderer.Characters[:0]
 	for _, ch := range g.client.NearbyChars {
 		frame := characterFrame(ch.Direction, ch.Walking, ch.WalkFrame(), ch.Combat.AttackTick)

@@ -47,6 +47,10 @@ func (g *Game) updateDialogs() bool {
 			g.client.Unlock()
 			return true
 		}
+		if g.overlay.shopDialogOpen {
+			g.overlay.shopDialogOpen = false
+			return true
+		}
 		if g.overlay.partyInviteOpen {
 			g.overlay.partyInviteOpen = false
 			g.client.Lock()
@@ -70,6 +74,10 @@ func (g *Game) updateDialogs() bool {
 
 	if g.overlay.tradeDialogOpen {
 		g.updateTradeDialog(mx, my)
+		return true
+	}
+	if g.overlay.shopDialogOpen {
+		g.updateShopDialog(mx, my)
 		return true
 	}
 

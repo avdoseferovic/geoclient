@@ -119,6 +119,10 @@ func (g *Game) handleEvent(evt game.Event) {
 		g.overlay.tradeDialogOpen = true
 	case game.EventTradeClosed:
 		g.overlay.tradeDialogOpen = false
+	case game.EventShopOpened:
+		g.overlay.shopDialogOpen = true
+	case game.EventOnlinePlayers:
+		// UI auto-refreshes from client.OnlinePlayers
 	case game.EventCharacterList:
 		g.overlay.loginSubmitting = false
 		g.overlay.selectingCharacter = false
