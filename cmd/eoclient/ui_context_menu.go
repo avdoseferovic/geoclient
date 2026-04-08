@@ -6,6 +6,8 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 
+	"github.com/avdo/eoweb/internal/game"
+	"github.com/avdo/eoweb/internal/render"
 	clientui "github.com/avdo/eoweb/internal/ui"
 	"github.com/avdo/eoweb/internal/ui/overlay"
 )
@@ -16,22 +18,47 @@ func (g *Game) tryOpenPlayerContextMenu() bool {
 	mx, my := ebiten.CursorPosition()
 	snapshot := g.client.UISnapshot()
 
-	// Check if cursor is over a nearby character
-	tileX, tileY := g.hoveredTile(snapshot)
-	for _, ch := range snapshot.NearbyChars {
+	ch, ok := g.playerContextMenuTarget(snapshot, mx, my)
+	if !ok {
+		return false
+	}
+
+	g.overlay.contextMenuOpen = true
+	g.overlay.contextMenuX = mx
+	g.overlay.contextMenuY = my
+	g.overlay.contextMenuPlayerID = ch.PlayerID
+	g.overlay.contextMenuName = ch.Name
+	return true
+}
+
+func (g *Game) playerContextMenuTarget(snapshot game.UISnapshot, mx, my int) (render.CharacterEntity, bool) {
+	if g.mapRenderer == nil || g.worldHoverBlockedByHUD(mx, my) {
+		return render.CharacterEntity{}, false
+	}
+
+	camSX, camSY := g.currentCameraScreenPosition(snapshot)
+	halfW := float64(g.screenW) / 2
+	halfH := float64(g.screenH) / 2
+
+	bestDepth := -1
+	var best render.CharacterEntity
+	for _, ch := range g.mapRenderer.Characters {
 		if ch.PlayerID == snapshot.PlayerID {
 			continue
 		}
-		if ch.X == tileX && ch.Y == tileY {
-			g.overlay.contextMenuOpen = true
-			g.overlay.contextMenuX = mx
-			g.overlay.contextMenuY = my
-			g.overlay.contextMenuPlayerID = ch.PlayerID
-			g.overlay.contextMenuName = ch.Name
-			return true
+		rect := characterHoverRect(ch, camSX, camSY, halfW, halfH)
+		if !overlay.PointInRect(mx, my, rect) {
+			continue
+		}
+		if rect.Max.Y > bestDepth {
+			bestDepth = rect.Max.Y
+			best = ch
 		}
 	}
-	return false
+	if bestDepth == -1 {
+		return render.CharacterEntity{}, false
+	}
+	return best, true
 }
 
 func (g *Game) contextMenuRect() image.Rectangle {

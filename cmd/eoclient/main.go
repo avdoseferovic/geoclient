@@ -113,6 +113,7 @@ type Game struct {
 	chatHistoryH   int
 
 	walkCooldown   int
+	faceCooldown   int
 	attackCooldown int
 	facingDir      int
 	isWalking      bool
@@ -192,6 +193,9 @@ func (g *Game) updateInGame() {
 
 	if g.walkCooldown > 0 {
 		g.walkCooldown--
+	}
+	if g.faceCooldown > 0 {
+		g.faceCooldown--
 	}
 	if g.attackCooldown > 0 {
 		g.attackCooldown--
@@ -295,11 +299,8 @@ func (g *Game) handleInGameLeftClick() bool {
 
 	if hover.CursorType == 1 {
 		if npc, ok := g.findNPCAtTile(hover.TileX, hover.TileY); ok && g.isInteractableNPC(npc.ID) {
-			if withinNPCInteractionRange(g.client.Character.X, g.client.Character.Y, hover.TileX, hover.TileY) {
-				g.sendNpcInteract(npc.Index, npc.ID)
-				return true
-			}
-			return g.queueAutoWalkToNpc(npc.Index, npc.ID, hover.TileX, hover.TileY)
+			g.sendNpcInteract(npc.Index, npc.ID)
+			return true
 		}
 		if movement.IsAdjacentTile(g.client.Character.X, g.client.Character.Y, hover.TileX, hover.TileY) {
 			// Check if it's a door tile — open it
@@ -360,7 +361,57 @@ func (g *Game) tryOpenShopAt(tileX, tileY int) bool {
 }
 
 func (g *Game) currentWorldHoverIntent() worldHoverIntent {
-	tileX, tileY := g.hoveredTile(g.client.UISnapshot())
+	snapshot := g.client.UISnapshot()
+	mx, my := ebiten.CursorPosition()
+
+	if g.worldHoverBlockedByHUD(mx, my) {
+		return worldHoverIntent{Valid: false}
+	}
+
+	camSX, camSY := g.currentCameraScreenPosition(snapshot)
+	halfW := float64(g.screenW) / 2
+	halfH := float64(g.screenH) / 2
+
+	// Check visual hits for entities first (depth-sorted)
+	bestDepth := -1
+	bestTileX, bestTileY := -1, -1
+	bestCursor := -1
+
+	// Characters
+	for _, ch := range g.mapRenderer.Characters {
+		rect := characterHoverRect(ch, camSX, camSY, halfW, halfH)
+		if overlay.PointInRect(mx, my, rect) {
+			if rect.Max.Y > bestDepth {
+				bestDepth = rect.Max.Y
+				bestTileX, bestTileY = ch.X, ch.Y
+				bestCursor = 1 // Interact cursor for players (e.g. for context menu)
+			}
+		}
+	}
+
+	// NPCs
+	for _, npc := range g.mapRenderer.Npcs {
+		rect := g.npcHoverRect(npc, camSX, camSY, halfW, halfH)
+		if overlay.PointInRect(mx, my, rect) {
+			if rect.Max.Y > bestDepth {
+				bestDepth = rect.Max.Y
+				bestTileX, bestTileY = npc.DestX, npc.DestY
+				bestCursor = 1 // Interaction cursor for NPCs
+			}
+		}
+	}
+
+	if bestDepth != -1 {
+		return worldHoverIntent{
+			TileX:      bestTileX,
+			TileY:      bestTileY,
+			CursorType: bestCursor,
+			Valid:      true,
+		}
+	}
+
+	// Fallback to ground-plane tile detection
+	tileX, tileY := g.hoveredTile(snapshot)
 	if !g.isMapTileInBounds(tileX, tileY) {
 		return worldHoverIntent{TileX: tileX, TileY: tileY, CursorType: -1, Valid: false}
 	}

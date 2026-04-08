@@ -73,8 +73,9 @@ func (g *Game) updateDialogs() bool {
 	}
 
 	if g.overlay.tradeDialogOpen {
-		g.updateTradeDialog(mx, my)
-		return true
+		if g.updateTradeDialog(mx, my) {
+			return true
+		}
 	}
 	if g.overlay.shopDialogOpen {
 		g.updateShopDialog(mx, my)

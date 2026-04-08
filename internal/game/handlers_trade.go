@@ -113,7 +113,7 @@ func handleTradeUse(c *Client, reader *data.EoReader) error {
 	applyTradeData(c, pkt.TradeData)
 	// Complete the trade: remove our items, add partner's items
 	for _, item := range c.Trade.PlayerItems {
-		setInventoryAmount(&c.Inventory, item.ID, 0)
+		addInventoryAmount(&c.Inventory, item.ID, -item.Amount)
 	}
 	for _, item := range c.Trade.PartnerItems {
 		addInventoryAmount(&c.Inventory, item.ID, item.Amount)

@@ -23,6 +23,7 @@ const (
 
 func (g *Game) resetMovementState() {
 	g.walkCooldown = 0
+	g.faceCooldown = 0
 	g.attackCooldown = 0
 	g.isWalking = false
 	g.moveHoldDir = -1
@@ -30,7 +31,7 @@ func (g *Game) resetMovementState() {
 }
 
 func (g *Game) faceOrWalk(dir int) bool {
-	if dir < 0 || g.walkCooldown > 0 {
+	if dir < 0 || g.isWalking {
 		return false
 	}
 	if g.facingDir != dir {
@@ -40,12 +41,12 @@ func (g *Game) faceOrWalk(dir int) bool {
 }
 
 func (g *Game) faceOnly(dir int) bool {
-	if dir < 0 || g.walkCooldown > 0 {
+	if dir < 0 || g.faceCooldown > 0 || g.isWalking {
 		return false
 	}
 	g.facingDir = dir
 	g.sendFace(dir)
-	g.walkCooldown = faceCooldownTicks
+	g.faceCooldown = faceCooldownTicks
 	return true
 }
 
@@ -103,6 +104,7 @@ func (g *Game) startLocalWalk(dir int) {
 
 	g.client.Lock()
 	defer g.client.Unlock()
+
 	for i := range g.client.NearbyChars {
 		if g.client.NearbyChars[i].PlayerID == g.client.PlayerID {
 			g.client.NearbyChars[i].Walking = true

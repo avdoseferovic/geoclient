@@ -50,7 +50,9 @@ type overlayState struct {
 	inventoryPage       int
 	lastClickItem       int
 	lastClickTick       int
+	shopView            int
 	shopTab             int
+	shopSelectedItem    int
 	itemAmountPicker    itemAmountPickerState
 }
 
@@ -103,7 +105,6 @@ func (g *Game) drawOverlayScreen(screen *ebiten.Image) {
 		g.drawGameHUD(screen, theme)
 		g.drawChat(screen, theme)
 		g.drawWorldHoverTooltip(screen, theme, snapshot)
-		g.drawItemAmountPicker(screen, theme)
 		if g.overlay.chestDialogOpen {
 			g.drawChestDialog(screen, theme)
 		}
@@ -116,7 +117,11 @@ func (g *Game) drawOverlayScreen(screen *ebiten.Image) {
 		if g.overlay.partyInviteOpen {
 			g.drawPartyInviteDialog(screen, theme)
 		}
+		g.drawItemAmountPicker(screen, theme)
 		g.drawContextMenu(screen, theme)
+		if g.inventoryDrag.Active {
+			g.drawInventoryDrag(screen)
+		}
 	}
 }
 
@@ -141,9 +146,6 @@ func (g *Game) drawGameHUD(screen *ebiten.Image, theme clientui.Theme) {
 	}
 	if g.overlay.activeMenuPanel != overlay.MenuPanelNone {
 		g.drawActiveHUDPanel(screen, theme, layout.MenuPanelRect, snapshot)
-	}
-	if g.inventoryDrag.Active {
-		g.drawInventoryDrag(screen)
 	}
 }
 

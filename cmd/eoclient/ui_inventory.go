@@ -43,7 +43,10 @@ func (g *Game) handleInGameOverlayClick() bool {
 		if overlay.PointInRect(mx, my, layout.MenuPanelRect) && g.handleHUDPanelClick(layout.MenuPanelRect, mx, my) {
 			return true
 		}
-		return true
+		return overlay.PointInRect(mx, my, chatPanelRect) ||
+			overlay.PointInRect(mx, my, layout.StatusRect) ||
+			overlay.PointInRect(mx, my, layout.MenuRect) ||
+			overlay.PointInRect(mx, my, layout.InfoRect)
 	}
 	return overlay.PointInRect(mx, my, chatPanelRect) ||
 		overlay.PointInRect(mx, my, layout.StatusRect) ||
@@ -278,10 +281,16 @@ func (g *Game) finishInventoryDrag() {
 	// Drop onto trade dialog → offer item
 	if g.overlay.tradeDialogOpen {
 		tradeRect := g.tradeDialogRect()
-		if overlay.PointInRect(mx, my, tradeRect) {
+		leftCol, _ := g.tradeColumnRects(tradeRect)
+		if overlay.PointInRect(mx, my, leftCol) {
 			item := g.findInventoryItem(g.inventoryDrag.ItemID)
 			if item != nil && item.Amount > 0 {
-				g.sendTradeAdd(item.ID, item.Amount)
+				if item.Amount > 1 {
+					g.openTradeAmountPicker(item.ID, item.Amount)
+				} else {
+					g.sendTradeAdd(item.ID, 1)
+					g.overlay.statusMessage = "Added item to trade"
+				}
 			}
 			return
 		}

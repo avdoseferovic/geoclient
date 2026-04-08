@@ -465,16 +465,16 @@ type Client struct {
 	Version   eonet.Version
 
 	// File Sync
-	PendingFiles []PendingFile
-	PendingMapID int
-	PendingMapRid []int
+	PendingFiles   []PendingFile
+	PendingMapID   int
+	PendingMapRid  []int
 	PendingMapSize int
-	MapsDir      string
-	ItemPubPath  string
-	NpcPubPath   string
-	SpellPubPath string
-	ClassPubPath string
-	AssetReader  assets.Reader
+	MapsDir        string
+	ItemPubPath    string
+	NpcPubPath     string
+	SpellPubPath   string
+	ClassPubPath   string
+	AssetReader    assets.Reader
 
 	// Character
 	Character  Character
@@ -545,6 +545,7 @@ const (
 	EventShopOpened
 	EventPartyUpdated
 	EventOnlinePlayers
+	EventFileUpdated
 )
 
 type Event struct {

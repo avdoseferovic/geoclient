@@ -423,7 +423,7 @@ func (g *Game) sendChestAdd(x, y, itemID, amount int) {
 
 func (g *Game) sendNpcInteract(npcIndex int, npcID int) {
 	bus := g.client.GetBus()
-	if bus == nil || npcIndex <= 0 {
+	if bus == nil || npcIndex < 0 {
 		return
 	}
 

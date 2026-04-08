@@ -9,6 +9,7 @@ import (
 	eonet "github.com/avdo/eoweb/internal/net"
 	"github.com/avdo/eoweb/internal/ui/login"
 	"github.com/avdo/eoweb/internal/ui/overlay"
+	"github.com/ethanmoffat/eolib-go/v3/protocol/net/client"
 )
 
 func (g *Game) connect() {
@@ -121,8 +122,13 @@ func (g *Game) handleEvent(evt game.Event) {
 		g.overlay.tradeDialogOpen = false
 	case game.EventShopOpened:
 		g.overlay.shopDialogOpen = true
+		g.overlay.shopView = shopViewMenu
+		g.overlay.shopSelectedItem = 0
 	case game.EventOnlinePlayers:
 		// UI auto-refreshes from client.OnlinePlayers
+	case game.EventFileUpdated:
+		fileType, _ := evt.Data.(client.FileType)
+		g.reloadPubMetadata(fileType)
 	case game.EventCharacterList:
 		g.overlay.loginSubmitting = false
 		g.overlay.selectingCharacter = false

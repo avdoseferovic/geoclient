@@ -41,12 +41,16 @@ func (g *Game) drawTradeDialog(screen *ebiten.Image, theme clientui.Theme) {
 	mx, my := ebiten.CursorPosition()
 
 	// Two columns
-	colW := (rect.Dx() - 30) / 2
-	leftCol := image.Rect(rect.Min.X+10, rect.Min.Y+28, rect.Min.X+10+colW, rect.Max.Y-40)
-	rightCol := image.Rect(rect.Min.X+20+colW, rect.Min.Y+28, rect.Max.X-10, rect.Max.Y-40)
+	leftCol, rightCol := g.tradeColumnRects(rect)
 
 	clientui.DrawInset(screen, leftCol, theme, false)
 	clientui.DrawInset(screen, rightCol, theme, false)
+	if g.inventoryDrag.Active {
+		mx, my := ebiten.CursorPosition()
+		if overlay.PointInRect(mx, my, leftCol) {
+			clientui.FillRect(screen, float64(leftCol.Min.X+2), float64(leftCol.Min.Y+2), float64(leftCol.Dx()-4), float64(leftCol.Dy()-4), overlay.Colorize(theme.Accent, 28))
+		}
+	}
 
 	clientui.DrawText(screen, "Your Offer", leftCol.Min.X+4, leftCol.Min.Y+12, theme.Text)
 	clientui.DrawText(screen, "Their Offer", rightCol.Min.X+4, rightCol.Min.Y+12, theme.Text)
@@ -75,11 +79,11 @@ func (g *Game) drawTradeDialog(screen *ebiten.Image, theme clientui.Theme) {
 		clientui.DrawText(screen, label, rightCol.Min.X+4, iy+11, theme.TextDim)
 	}
 
-	// Drag hint
-	clientui.DrawTextCentered(screen, "Drag items from bag to offer", image.Rect(rect.Min.X+10, rect.Max.Y-52, rect.Max.X-136, rect.Max.Y-38), theme.TextDim)
-
 	// Status line
-	statusY := rect.Max.Y - 36
+	hintRect := image.Rect(rect.Min.X+12, rect.Max.Y-58, rect.Max.X-136, rect.Max.Y-44)
+	statusRect := image.Rect(rect.Min.X+12, rect.Max.Y-42, rect.Max.X-136, rect.Max.Y-28)
+	clientui.DrawText(screen, "Drag items from bag to offer", hintRect.Min.X, hintRect.Min.Y+12, theme.TextDim)
+
 	status := "Waiting..."
 	if trade.PlayerAgreed && trade.PartnerAgreed {
 		status = "Both agreed!"
@@ -88,7 +92,7 @@ func (g *Game) drawTradeDialog(screen *ebiten.Image, theme clientui.Theme) {
 	} else if trade.PartnerAgreed {
 		status = "Partner agreed."
 	}
-	clientui.DrawText(screen, status, rect.Min.X+12, statusY, theme.TextDim)
+	clientui.DrawText(screen, status, statusRect.Min.X, statusRect.Min.Y+12, theme.TextDim)
 
 	// Buttons (render only — input handled in updateDialogs)
 	agreeRect := image.Rect(rect.Max.X-130, rect.Max.Y-32, rect.Max.X-72, rect.Max.Y-14)
@@ -113,6 +117,13 @@ func (g *Game) drawTradePending(screen *ebiten.Image, theme clientui.Theme, trad
 
 	clientui.DrawButton(screen, acceptRect, theme, "Accept", false, overlay.PointInRect(mx, my, acceptRect))
 	clientui.DrawButton(screen, declineRect, theme, "Decline", false, overlay.PointInRect(mx, my, declineRect))
+}
+
+func (g *Game) tradeColumnRects(rect image.Rectangle) (image.Rectangle, image.Rectangle) {
+	colW := (rect.Dx() - 30) / 2
+	leftCol := image.Rect(rect.Min.X+10, rect.Min.Y+28, rect.Min.X+10+colW, rect.Max.Y-40)
+	rightCol := image.Rect(rect.Min.X+20+colW, rect.Min.Y+28, rect.Max.X-10, rect.Max.Y-40)
+	return leftCol, rightCol
 }
 
 func (g *Game) tradeItemLabel(itemID, amount int) string {

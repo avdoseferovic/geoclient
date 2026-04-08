@@ -35,8 +35,8 @@ func (c *Client) requestNextFile() error {
 
 	slog.Info("requesting file", "type", file.Type, "id", file.ID)
 	return bus.SendSequenced(&client.WelcomeAgreeClientPacket{
-		FileType: file.Type,
-		SessionId: c.SessionID,
+		FileType:     file.Type,
+		SessionId:    c.SessionID,
 		FileTypeData: fileTypeData(file.Type, file.ID),
 	})
 }
@@ -89,7 +89,7 @@ func (c *Client) checkFile(fileType client.FileType, id int, rid []int, size int
 	}
 
 	if len(raw) >= 4 {
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			if i < len(rid) && int(raw[i]) != rid[i] {
 				return false
 			}
@@ -129,6 +129,7 @@ func handleInitFilePub(c *Client, fileType client.FileType, content []byte) erro
 	if err := saveFile(path, content); err != nil {
 		return err
 	}
+	c.Emit(Event{Type: EventFileUpdated, Data: fileType})
 	return c.requestNextFile()
 }
 
@@ -137,10 +138,10 @@ func saveFile(path string, content []byte) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 
 	slog.Info("saving file", "path", path, "size", len(content))
-	return os.WriteFile(path, content, 0644)
+	return os.WriteFile(path, content, 0o644)
 }
