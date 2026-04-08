@@ -61,24 +61,24 @@ func (g *Game) completeAutoWalkAction() bool {
 		}
 		return g.faceOnly(dir)
 	case movement.QueuedActionOpenShop:
-		if !movement.IsAdjacentTile(g.client.Character.X, g.client.Character.Y, plan.ActionTile.X, plan.ActionTile.Y) {
+		if !withinNPCInteractionRange(g.client.Character.X, g.client.Character.Y, plan.ActionTile.X, plan.ActionTile.Y) {
 			return false
 		}
-		g.sendShopOpen(plan.NpcIndex)
+		g.sendNpcInteract(plan.NpcIndex, plan.NpcID)
 		return true
 	default:
 		return false
 	}
 }
 
-func (g *Game) queueAutoWalkToShop(npcIndex, tileX, tileY int) bool {
-	goals := make([]movement.TileCoord, 0, 4)
-	for dir := range 4 {
-		nextX, nextY := movement.NextTileInDirection(tileX, tileY, dir)
-		if !g.canStepTo(nextX, nextY) {
-			continue
+func (g *Game) queueAutoWalkToNpc(npcIndex, npcID, tileX, tileY int) bool {
+	goals := make([]movement.TileCoord, 0, 8)
+	for x := tileX - npcInteractionRange; x <= tileX+npcInteractionRange; x++ {
+		for y := tileY - npcInteractionRange; y <= tileY+npcInteractionRange; y++ {
+			if withinNPCInteractionRange(x, y, tileX, tileY) && g.canStepTo(x, y) {
+				goals = append(goals, movement.TileCoord{X: x, Y: y})
+			}
 		}
-		goals = append(goals, movement.TileCoord{X: nextX, Y: nextY})
 	}
 	if len(goals) == 0 {
 		g.clearAutoWalk()
@@ -91,7 +91,7 @@ func (g *Game) queueAutoWalkToShop(npcIndex, tileX, tileY int) bool {
 		return false
 	}
 	if len(path) == 0 {
-		g.sendShopOpen(npcIndex)
+		g.sendNpcInteract(npcIndex, npcID)
 		return true
 	}
 	g.autoWalk = autoWalkPlan{
@@ -100,6 +100,7 @@ func (g *Game) queueAutoWalkToShop(npcIndex, tileX, tileY int) bool {
 		Action:     movement.QueuedActionOpenShop,
 		ActionTile: movement.TileCoord{X: tileX, Y: tileY},
 		NpcIndex:   npcIndex,
+		NpcID:      npcID,
 	}
 	return true
 }

@@ -8,6 +8,8 @@ type runtimeConfig struct {
 	mapsDir       string
 	itemPubPath   string
 	npcPubPath    string
+	spellPubPath  string
+	classPubPath  string
 	layoutPath    string
 	assetReader   assets.Reader
 	windowTitle   string

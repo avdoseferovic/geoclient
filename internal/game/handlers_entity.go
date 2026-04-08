@@ -24,6 +24,7 @@ func RegisterEntityHandlers(reg *HandlerRegistry) {
 	reg.Register(eonet.PacketFamily_Face, eonet.PacketAction_Player, handleFacePlayer)
 	reg.Register(eonet.PacketFamily_Players, eonet.PacketAction_Agree, handlePlayersAgree)
 	reg.Register(eonet.PacketFamily_Npc, eonet.PacketAction_Accept, handleNpcAcceptEntity)
+	reg.Register(eonet.PacketFamily_Npc, eonet.PacketAction_Agree, handleNpcAgree)
 	reg.Register(eonet.PacketFamily_Npc, eonet.PacketAction_Player, handleNpcPlayer)
 	reg.Register(eonet.PacketFamily_Npc, eonet.PacketAction_Reply, handleNpcReplyEntity)
 	reg.Register(eonet.PacketFamily_Npc, eonet.PacketAction_Spec, handleNpcSpecEntity)

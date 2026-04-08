@@ -29,6 +29,13 @@ func handleWarpRequest(c *Client, reader *data.EoReader) error {
 	c.mu.Lock()
 	c.Character.MapID = pkt.MapId
 	c.SessionID = pkt.SessionId
+	if d, ok := pkt.WarpTypeData.(*server.WarpRequestWarpTypeDataMapSwitch); ok {
+		c.PendingMapID = pkt.MapId
+		c.PendingMapRid = d.MapRid
+		c.PendingMapSize = d.MapFileSize
+	} else {
+		c.PendingMapID = 0
+	}
 	c.mu.Unlock()
 
 	slog.Info("warp request", "mapID", pkt.MapId, "sessionID", pkt.SessionId)
@@ -42,6 +49,17 @@ func handleWarpAgree(c *Client, reader *data.EoReader) error {
 	}
 
 	c.mu.Lock()
+	if c.PendingMapID != 0 && c.PendingMapID == c.Character.MapID {
+		if !c.checkFile(client.File_Emf, c.PendingMapID, c.PendingMapRid, c.PendingMapSize) {
+			c.PendingFiles = []PendingFile{{Type: client.File_Emf, ID: c.PendingMapID}}
+			replaceNearbyInfo(c, pkt.Nearby)
+			c.PendingMapID = 0
+			c.mu.Unlock()
+			c.SetState(StateLoadingFiles)
+			return c.requestNextFile()
+		}
+	}
+	c.PendingMapID = 0
 	replaceNearbyInfo(c, pkt.Nearby)
 	c.mu.Unlock()
 

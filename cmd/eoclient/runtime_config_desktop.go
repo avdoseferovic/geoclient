@@ -20,6 +20,8 @@ func loadRuntimeConfig() runtimeConfig {
 		mapsDir:       "maps",
 		itemPubPath:   "pub/dat001.eif",
 		npcPubPath:    "pub/dtn001.enf",
+		spellPubPath:  "pub/dsl001.esf",
+		classPubPath:  "pub/dat001.ecf",
 		layoutPath:    "inventory-layout.json",
 		assetReader:   assets.NewOSReader(),
 		windowTitle:   "EO Client",

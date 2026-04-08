@@ -115,6 +115,20 @@ func handleInitInit(c *Client, reader *data.EoReader) error {
 	switch pkt.ReplyCode {
 	case server.InitReply_Ok:
 		return handleInitOk(c, pkt.ReplyCodeData.(*server.InitInitReplyCodeDataOk))
+	case server.InitReply_FileEmf:
+		return handleInitFileEmf(c, pkt.ReplyCodeData.(*server.InitInitReplyCodeDataFileEmf))
+	case server.InitReply_FileEif:
+		d := pkt.ReplyCodeData.(*server.InitInitReplyCodeDataFileEif)
+		return handleInitFilePub(c, client.File_Eif, d.PubFile.Content)
+	case server.InitReply_FileEnf:
+		d := pkt.ReplyCodeData.(*server.InitInitReplyCodeDataFileEnf)
+		return handleInitFilePub(c, client.File_Enf, d.PubFile.Content)
+	case server.InitReply_FileEsf:
+		d := pkt.ReplyCodeData.(*server.InitInitReplyCodeDataFileEsf)
+		return handleInitFilePub(c, client.File_Esf, d.PubFile.Content)
+	case server.InitReply_FileEcf:
+		d := pkt.ReplyCodeData.(*server.InitInitReplyCodeDataFileEcf)
+		return handleInitFilePub(c, client.File_Ecf, d.PubFile.Content)
 	case server.InitReply_OutOfDate:
 		d := pkt.ReplyCodeData.(*server.InitInitReplyCodeDataOutOfDate)
 		c.Version = d.Version
@@ -325,18 +339,31 @@ func handleWelcomeReply(c *Client, reader *data.EoReader) error {
 		syncWelcomeCharacterState(c, d)
 		slog.Info("character selected", "sessionID", d.SessionId, "mapID", d.MapId)
 
-		// Send welcome message to enter game
-		bus := c.GetBus()
-		if bus == nil {
-			return fmt.Errorf("connection bus missing during welcome")
+		c.mu.Lock()
+		c.PendingFiles = nil
+		if !c.checkFile(client.File_Ecf, 1, d.EcfRid, d.EcfLength) {
+			c.PendingFiles = append(c.PendingFiles, PendingFile{Type: client.File_Ecf, ID: 1})
 		}
-		if err := bus.SendSequenced(&client.WelcomeMsgClientPacket{
-			SessionId:   d.SessionId,
-			CharacterId: d.CharacterId,
-		}); err != nil {
-			return fmt.Errorf("enter game failed while sending welcome message: %w", err)
+		if !c.checkFile(client.File_Esf, 1, d.EsfRid, d.EsfLength) {
+			c.PendingFiles = append(c.PendingFiles, PendingFile{Type: client.File_Esf, ID: 1})
 		}
-		return nil
+		if !c.checkFile(client.File_Enf, 1, d.EnfRid, d.EnfLength) {
+			c.PendingFiles = append(c.PendingFiles, PendingFile{Type: client.File_Enf, ID: 1})
+		}
+		if !c.checkFile(client.File_Eif, 1, d.EifRid, d.EifLength) {
+			c.PendingFiles = append(c.PendingFiles, PendingFile{Type: client.File_Eif, ID: 1})
+		}
+		if !c.checkFile(client.File_Emf, int(d.MapId), d.MapRid, d.MapFileSize) {
+			c.PendingFiles = append(c.PendingFiles, PendingFile{Type: client.File_Emf, ID: int(d.MapId)})
+		}
+		c.mu.Unlock()
+
+		if len(c.PendingFiles) > 0 {
+			c.SetState(StateLoadingFiles)
+			return c.requestNextFile()
+		}
+
+		return c.enterGame()
 
 	case server.WelcomeCode_EnterGame:
 		d := pkt.WelcomeCodeData.(*server.WelcomeReplyWelcomeCodeDataEnterGame)

@@ -38,10 +38,19 @@ func main() {
 		slog.Warn("inventory layout unavailable", "path", cfg.layoutPath, "err", err)
 		inventoryLayout = make(map[int]storedInventoryPos)
 	}
+
+	cl := game.NewClient()
+	cl.MapsDir = cfg.mapsDir
+	cl.ItemPubPath = cfg.itemPubPath
+	cl.NpcPubPath = cfg.npcPubPath
+	cl.SpellPubPath = cfg.spellPubPath
+	cl.ClassPubPath = cfg.classPubPath
+	cl.AssetReader = cfg.assetReader
+
 	g := &Game{
 		screenW:             cfg.defaultWidth,
 		screenH:             cfg.defaultHeight,
-		client:              game.NewClient(),
+		client:              cl,
 		handlers:            game.NewHandlerRegistry(),
 		gfxLoad:             loader,
 		itemDB:              itemDB,
@@ -285,12 +294,12 @@ func (g *Game) handleInGameLeftClick() bool {
 	}
 
 	if hover.CursorType == 1 {
-		if npc, ok := g.findNPCAtTile(hover.TileX, hover.TileY); ok && g.isShopNPC(npc.ID) {
-			if movement.IsAdjacentTile(g.client.Character.X, g.client.Character.Y, hover.TileX, hover.TileY) {
-				g.sendShopOpen(npc.Index)
+		if npc, ok := g.findNPCAtTile(hover.TileX, hover.TileY); ok && g.isInteractableNPC(npc.ID) {
+			if withinNPCInteractionRange(g.client.Character.X, g.client.Character.Y, hover.TileX, hover.TileY) {
+				g.sendNpcInteract(npc.Index, npc.ID)
 				return true
 			}
-			return g.queueAutoWalkToShop(npc.Index, hover.TileX, hover.TileY)
+			return g.queueAutoWalkToNpc(npc.Index, npc.ID, hover.TileX, hover.TileY)
 		}
 		if movement.IsAdjacentTile(g.client.Character.X, g.client.Character.Y, hover.TileX, hover.TileY) {
 			// Check if it's a door tile — open it
@@ -328,16 +337,25 @@ func (g *Game) findNPCAtTile(tileX, tileY int) (game.NearbyNPC, bool) {
 	return game.NearbyNPC{}, false
 }
 
-func (g *Game) isShopNPC(npcID int) bool {
-	return g.npcDB != nil && g.npcDB.Type(npcID) == pub.Npc_Shop
+func (g *Game) isInteractableNPC(npcID int) bool {
+	if g.npcDB == nil {
+		return false
+	}
+	switch g.npcDB.Type(npcID) {
+	case pub.Npc_Shop, pub.Npc_Inn, pub.Npc_Bank, pub.Npc_Barber,
+		pub.Npc_Guild, pub.Npc_Priest, pub.Npc_Lawyer, pub.Npc_Trainer, pub.Npc_Quest:
+		return true
+	default:
+		return false
+	}
 }
 
 func (g *Game) tryOpenShopAt(tileX, tileY int) bool {
 	npc, ok := g.findNPCAtTile(tileX, tileY)
-	if !ok || !g.isShopNPC(npc.ID) || !movement.IsAdjacentTile(g.client.Character.X, g.client.Character.Y, tileX, tileY) {
+	if !ok || !g.isInteractableNPC(npc.ID) || !movement.IsAdjacentTile(g.client.Character.X, g.client.Character.Y, tileX, tileY) {
 		return false
 	}
-	g.sendShopOpen(npc.Index)
+	g.sendNpcInteract(npc.Index, npc.ID)
 	return true
 }
 

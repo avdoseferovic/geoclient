@@ -8,9 +8,11 @@ import (
 	"github.com/ethanmoffat/eolib-go/v3/data"
 	eonet "github.com/ethanmoffat/eolib-go/v3/protocol/net"
 	"github.com/ethanmoffat/eolib-go/v3/protocol/net/client"
+	"github.com/ethanmoffat/eolib-go/v3/protocol/pub"
 
 	"github.com/avdo/eoweb/internal/game"
 	internalnet "github.com/avdo/eoweb/internal/net"
+	"github.com/avdo/eoweb/internal/pubdata"
 )
 
 type fakePacketConn struct {
@@ -110,8 +112,11 @@ func TestSendShopPacketsUseSessionID(t *testing.T) {
 	c.SetBus(bus)
 	c.SessionID = 77
 
-	g := &Game{client: c}
-	g.sendShopOpen(8)
+	g := &Game{
+		client: c,
+		npcDB:  pubdata.NewNPCDB(pubdata.NPCDef{ID: 15, Name: "Shop Bob", Type: pub.Npc_Shop}),
+	}
+	g.sendNpcInteract(8, 15) // NPC index 8, ENF ID 15 (Shop Bob, type Shop)
 	g.sendShopBuy(5, 2)
 	g.sendShopSell(6, 3)
 	g.sendShopCraft(9)

@@ -212,3 +212,35 @@ func handleRecoverPlayerEntity(c *Client, reader *data.EoReader) error {
 
 	return nil
 }
+
+func handleNpcAgree(c *Client, reader *data.EoReader) error {
+	var pkt server.NpcAgreeServerPacket
+	if err := pkt.Deserialize(reader); err != nil {
+		return fmt.Errorf("deserialize npc agree: %w", err)
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for _, npc := range pkt.Npcs {
+		existing := findNPC(c.NearbyNpcs, npc.Index)
+		if existing == nil {
+			c.NearbyNpcs = append(c.NearbyNpcs, NearbyNPC{
+				Index:     npc.Index,
+				ID:        npc.Id,
+				X:         npc.Coords.X,
+				Y:         npc.Coords.Y,
+				Direction: int(npc.Direction),
+			})
+			continue
+		}
+
+		existing.ID = npc.Id
+		existing.X = npc.Coords.X
+		existing.Y = npc.Coords.Y
+		existing.Direction = int(npc.Direction)
+		resetNPCTransientState(existing)
+	}
+
+	return nil
+}

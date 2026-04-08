@@ -421,13 +421,43 @@ func (g *Game) sendChestAdd(x, y, itemID, amount int) {
 	}
 }
 
-func (g *Game) sendShopOpen(npcIndex int) {
+func (g *Game) sendNpcInteract(npcIndex int, npcID int) {
 	bus := g.client.GetBus()
 	if bus == nil || npcIndex <= 0 {
 		return
 	}
-	if err := bus.SendSequenced(&client.ShopOpenClientPacket{NpcIndex: npcIndex}); err != nil {
-		slog.Error("send shop open failed", "npcIndex", npcIndex, "err", err)
+
+	var pkt eonet.Packet
+	npcType := pub.Npc_Friendly
+	if g.npcDB != nil {
+		npcType = g.npcDB.Type(npcID)
+	}
+
+	switch npcType {
+	case pub.Npc_Shop:
+		pkt = &client.ShopOpenClientPacket{NpcIndex: npcIndex}
+	case pub.Npc_Bank:
+		pkt = &client.BankOpenClientPacket{NpcIndex: npcIndex}
+	case pub.Npc_Inn:
+		pkt = &client.CitizenOpenClientPacket{NpcIndex: npcIndex}
+	case pub.Npc_Barber:
+		pkt = &client.BarberOpenClientPacket{NpcIndex: npcIndex}
+	case pub.Npc_Guild:
+		pkt = &client.GuildOpenClientPacket{NpcIndex: npcIndex}
+	case pub.Npc_Priest:
+		pkt = &client.PriestOpenClientPacket{NpcIndex: npcIndex}
+	case pub.Npc_Lawyer:
+		pkt = &client.MarriageOpenClientPacket{NpcIndex: npcIndex}
+	case pub.Npc_Trainer:
+		pkt = &client.StatSkillOpenClientPacket{NpcIndex: npcIndex}
+	case pub.Npc_Quest:
+		pkt = &client.QuestUseClientPacket{NpcIndex: npcIndex}
+	default:
+		return
+	}
+
+	if err := bus.SendSequenced(pkt); err != nil {
+		slog.Error("send npc interact failed", "npcIndex", npcIndex, "type", npcType, "err", err)
 	}
 }
 

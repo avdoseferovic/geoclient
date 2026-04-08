@@ -10,6 +10,7 @@ import (
 	netclient "github.com/ethanmoffat/eolib-go/v3/protocol/net/client"
 	"github.com/ethanmoffat/eolib-go/v3/protocol/net/server"
 
+	"github.com/avdo/eoweb/internal/assets"
 	"github.com/avdo/eoweb/internal/net"
 )
 
@@ -20,6 +21,7 @@ const (
 	StateConnected
 	StateLogin
 	StateLoggedIn
+	StateLoadingFiles
 	StateInGame
 )
 
@@ -33,6 +35,8 @@ func (s GameState) String() string {
 		return "Login"
 	case StateLoggedIn:
 		return "LoggedIn"
+	case StateLoadingFiles:
+		return "LoadingFiles"
 	case StateInGame:
 		return "InGame"
 	default:
@@ -443,6 +447,11 @@ type NearbyItem struct {
 	Amount    int
 }
 
+type PendingFile struct {
+	Type netclient.FileType
+	ID   int
+}
+
 // Client holds all game state.
 type Client struct {
 	mu    sync.RWMutex
@@ -454,6 +463,18 @@ type Client struct {
 	SessionID int
 	Challenge int
 	Version   eonet.Version
+
+	// File Sync
+	PendingFiles []PendingFile
+	PendingMapID int
+	PendingMapRid []int
+	PendingMapSize int
+	MapsDir      string
+	ItemPubPath  string
+	NpcPubPath   string
+	SpellPubPath string
+	ClassPubPath string
+	AssetReader  assets.Reader
 
 	// Character
 	Character  Character

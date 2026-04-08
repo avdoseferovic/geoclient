@@ -27,6 +27,7 @@ type AutoWalkPlan struct {
 	ActionTile TileCoord
 	ItemUID    int
 	NpcIndex   int
+	NpcID      int
 }
 
 // CanStepFunc is called by the pathfinder to check if a tile is walkable.
