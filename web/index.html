@@ -36,19 +36,21 @@
 <body>
   <header>EO Client Web</header>
   <div id="status">Loading WebAssembly client...</div>
+  <script src="/config.js"></script>
   <script>
-    window.__EO_ASSET_BASE__ = window.__EO_ASSET_BASE__ || "/assets";
-    window.__EO_SERVER_ADDR__ = window.__EO_SERVER_ADDR__ || (() => {
+    const fallbackServerAddr = (() => {
       const scheme = window.location.protocol === "https:" ? "wss://" : "ws://";
       return `${scheme}${window.location.hostname}:8078`;
     })();
+    window.__EO_SERVER_ADDR__ = window.__EO_SERVER_ADDR__ || fallbackServerAddr;
   </script>
   <script src="/wasm_exec.js"></script>
   <script>
     const status = document.getElementById("status");
     const go = new Go();
 
-    WebAssembly.instantiateStreaming(fetch("/eoclient.wasm"), go.importObject)
+    Promise.resolve()
+      .then(() => WebAssembly.instantiateStreaming(fetch("/eoclient.wasm"), go.importObject))
       .then((result) => {
         status.remove();
         go.run(result.instance);

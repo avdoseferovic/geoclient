@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WEB_DIR="$ROOT_DIR/web"
+WEB_DIR="${WEB_DIR:-$ROOT_DIR/web}"
 WASM_EXEC_SRC="$(go env GOROOT)/lib/wasm/wasm_exec.js"
 
 if [[ ! -f "$WASM_EXEC_SRC" ]]; then

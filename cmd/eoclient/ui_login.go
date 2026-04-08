@@ -40,9 +40,9 @@ func (g *Game) updateLogin() {
 		}
 	}
 
-	fieldCount := 2
+	fieldCount := 3
 	if g.overlay.authMode == login.ModeCreateAccount {
-		fieldCount = 5
+		fieldCount = 6
 	}
 	if g.overlay.authMode == login.ModeCredits || g.overlay.authMode == login.ModeHome {
 		fieldCount = 0
@@ -69,6 +69,8 @@ func (g *Game) updateLogin() {
 			field = &g.overlay.loginEmail
 		case login.FocusAddress:
 			field = &g.overlay.loginAddress
+		case login.FocusServer:
+			field = &g.overlay.loginServerAddr
 		}
 		if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) && len(*field) > 0 {
 			*field = (*field)[:len(*field)-1]
@@ -92,6 +94,18 @@ func (g *Game) updateLogin() {
 }
 
 func (g *Game) submitLogin() {
+	serverChanged, ok := g.applyServerAddressInput()
+	if !ok {
+		return
+	}
+	if serverChanged && g.client.GetState() == game.StateConnected {
+		g.client.Disconnect()
+		g.connected = false
+		g.connectArmed = true
+		g.connectError = ""
+		g.overlay.statusMessage = "Server updated. Reconnecting..."
+		return
+	}
 	username := strings.TrimSpace(string(g.overlay.loginUsername))
 	password := string(g.overlay.loginPassword)
 	if username == "" || password == "" {
@@ -107,6 +121,18 @@ func (g *Game) submitLogin() {
 }
 
 func (g *Game) submitAccountCreate() {
+	serverChanged, ok := g.applyServerAddressInput()
+	if !ok {
+		return
+	}
+	if serverChanged && g.client.GetState() == game.StateConnected {
+		g.client.Disconnect()
+		g.connected = false
+		g.connectArmed = true
+		g.connectError = ""
+		g.overlay.statusMessage = "Server updated. Reconnecting..."
+		return
+	}
 	username := strings.TrimSpace(string(g.overlay.loginUsername))
 	password := string(g.overlay.loginPassword)
 	confirm := string(g.overlay.loginPassword2)
@@ -131,5 +157,22 @@ func (g *Game) submitAccountCreate() {
 
 func (g *Game) drawLoginDialog(screen *ebiten.Image, theme clientui.Theme) {
 	layout := login.LayoutFor(g.screenW, g.screenH)
-	login.Draw(screen, theme, layout, g.overlay.authMode, g.overlay.loginFocus, g.overlay.ticks, g.overlay.loginUsername, g.overlay.loginPassword, g.overlay.loginPassword2, g.overlay.loginEmail, g.overlay.loginAddress, g.overlay.loginSubmitting, g.connectError)
+	login.Draw(screen, theme, layout, g.overlay.authMode, g.overlay.loginFocus, g.overlay.ticks, g.overlay.loginUsername, g.overlay.loginPassword, g.overlay.loginPassword2, g.overlay.loginEmail, g.overlay.loginAddress, g.overlay.loginServerAddr, g.overlay.loginSubmitting, g.connectError)
+}
+
+func (g *Game) applyServerAddressInput() (bool, bool) {
+	addr := strings.TrimSpace(string(g.overlay.loginServerAddr))
+	if addr == "" {
+		g.connectError = "Enter a server address"
+		return false, false
+	}
+	changed := addr != g.serverAddr
+	g.serverAddr = addr
+	if g.serverConfigKey != "" {
+		if err := saveServerPreference(g.serverConfigKey, addr); err != nil {
+			g.connectError = "Unable to save server address"
+			return false, false
+		}
+	}
+	return changed, true
 }

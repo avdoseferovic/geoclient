@@ -25,6 +25,7 @@ const (
 	FocusPasswordConfirm
 	FocusEmail
 	FocusAddress
+	FocusServer
 )
 
 type Layout struct {
@@ -39,6 +40,7 @@ type Layout struct {
 	ConfirmRect image.Rectangle
 	EmailRect   image.Rectangle
 	AddressRect image.Rectangle
+	ServerRect  image.Rectangle
 	SubmitRect  image.Rectangle
 }
 
@@ -52,12 +54,13 @@ func LayoutFor(sw, sh int) Layout {
 	const rowStep = 56
 	const submitHeight = 26
 	const bottomPad = 22
-	firstRowTop := contentRect.Max.Y - bottomPad - submitHeight - 18 - inputHeight - rowStep*4
+	firstRowTop := contentRect.Max.Y - bottomPad - submitHeight - 18 - inputHeight - rowStep*5
 	userRect := image.Rect(contentLeft, firstRowTop, contentRight, firstRowTop+inputHeight)
 	passRect := userRect.Add(image.Pt(0, rowStep))
 	confirmRect := passRect.Add(image.Pt(0, rowStep))
 	emailRect := confirmRect.Add(image.Pt(0, rowStep))
 	addressRect := emailRect.Add(image.Pt(0, rowStep))
+	serverRect := addressRect.Add(image.Pt(0, rowStep))
 	submitRect := image.Rect(contentRight-160, contentRect.Max.Y-bottomPad-submitHeight, contentRight, contentRect.Max.Y-bottomPad)
 	const menuButtonHeight = 26
 	const menuButtonGap = 8
@@ -77,11 +80,12 @@ func LayoutFor(sw, sh int) Layout {
 		ConfirmRect: confirmRect,
 		EmailRect:   emailRect,
 		AddressRect: addressRect,
+		ServerRect:  serverRect,
 		SubmitRect:  submitRect,
 	}
 }
 
-func Draw(screen *ebiten.Image, theme clientui.Theme, layout Layout, mode AuthMode, focus int, ticks int, username, password, password2, email, address []rune, submitting bool, connectError string) {
+func Draw(screen *ebiten.Image, theme clientui.Theme, layout Layout, mode AuthMode, focus int, ticks int, username, password, password2, email, address, serverAddr []rune, submitting bool, connectError string) {
 	rect := layout.Dialog
 	clientui.DrawPanel(screen, rect, theme, clientui.PanelOptions{Accent: theme.Accent})
 	clientui.DrawInset(screen, layout.MenuRect, theme, false)
@@ -97,7 +101,7 @@ func Draw(screen *ebiten.Image, theme clientui.Theme, layout Layout, mode AuthMo
 	case ModeCredits:
 		drawCreditsPanel(screen, theme, layout)
 	default:
-		drawAuthPanel(screen, theme, layout, mode, focus, ticks, username, password, password2, email, address, submitting)
+		drawAuthPanel(screen, theme, layout, mode, focus, ticks, username, password, password2, email, address, serverAddr, submitting)
 	}
 
 	statusColor := theme.TextDim
@@ -118,7 +122,7 @@ func drawLandingPanel(screen *ebiten.Image, theme clientui.Theme, layout Layout)
 	clientui.DrawInset(screen, image.Rect(layout.ContentRect.Min.X+20, layout.ContentRect.Min.Y+20, layout.ContentRect.Max.X-20, layout.ContentRect.Max.Y-20), theme, false)
 }
 
-func drawAuthPanel(screen *ebiten.Image, theme clientui.Theme, layout Layout, mode AuthMode, focus, ticks int, username, password, password2, email, address []rune, submitting bool) {
+func drawAuthPanel(screen *ebiten.Image, theme clientui.Theme, layout Layout, mode AuthMode, focus, ticks int, username, password, password2, email, address, serverAddr []rune, submitting bool) {
 	clientui.DrawText(screen, "Account", layout.UserRect.Min.X, layout.UserRect.Min.Y-8, theme.TextDim)
 	clientui.DrawInset(screen, layout.UserRect, theme, focus == FocusUsername)
 	userText := string(username)
@@ -161,6 +165,14 @@ func drawAuthPanel(screen *ebiten.Image, theme clientui.Theme, layout Layout, mo
 		clientui.DrawText(screen, addressText, layout.AddressRect.Min.X+10, layout.AddressRect.Min.Y+18, theme.Text)
 	}
 
+	clientui.DrawText(screen, "Server", layout.ServerRect.Min.X, layout.ServerRect.Min.Y-8, theme.TextDim)
+	clientui.DrawInset(screen, layout.ServerRect, theme, focus == FocusServer)
+	serverText := string(serverAddr)
+	if focus == FocusServer && ticks%40 < 20 {
+		serverText += "_"
+	}
+	clientui.DrawText(screen, serverText, layout.ServerRect.Min.X+10, layout.ServerRect.Min.Y+18, theme.Text)
+
 	buttonLabel := "Enter Realm"
 	if mode == ModeCreateAccount {
 		buttonLabel = "Create Account"
@@ -181,8 +193,12 @@ func drawCreditsPanel(screen *ebiten.Image, theme clientui.Theme, layout Layout)
 	clientui.DrawTextWrappedCentered(screen, "Use the left rail to return to Sign In or Create Account.", image.Rect(creditsRect.Min.X+18, creditsRect.Max.Y-52, creditsRect.Max.X-18, creditsRect.Max.Y-20), theme.TextDim)
 }
 
-func DrawConnecting(screen *ebiten.Image, theme clientui.Theme, sw, sh, ticks int, statusMessage, connectError string) {
-	rect := overlay.CenteredRect(360, 128, sw, sh)
+func DrawConnecting(screen *ebiten.Image, theme clientui.Theme, sw, sh, ticks int, statusMessage, connectError string, serverAddr []rune, editing bool) {
+	height := 128
+	if connectError != "" {
+		height = 196
+	}
+	rect := overlay.CenteredRect(420, height, sw, sh)
 	clientui.DrawPanel(screen, rect, theme, clientui.PanelOptions{Title: "Gate Link", Accent: theme.Accent})
 	status := "Contacting server"
 	if connectError != "" {
@@ -195,16 +211,30 @@ func DrawConnecting(screen *ebiten.Image, theme clientui.Theme, sw, sh, ticks in
 		line = overlay.DotPulse("Opening relay", ticks)
 	}
 	if connectError != "" {
-		line = connectError
+		line = "Check the server address and try again."
 	}
 	clientui.DrawTextCentered(screen, line, image.Rect(rect.Min.X+28, rect.Min.Y+56, rect.Max.X-28, rect.Min.Y+82), overlay.TernaryColor(connectError == "", theme.TextDim, theme.Danger))
 
+	if connectError != "" {
+		serverRect := image.Rect(rect.Min.X+28, rect.Min.Y+94, rect.Max.X-28, rect.Min.Y+122)
+		clientui.DrawText(screen, "Server", serverRect.Min.X, serverRect.Min.Y-8, theme.TextDim)
+		clientui.DrawInset(screen, serverRect, theme, editing)
+		serverText := string(serverAddr)
+		if editing && ticks%40 < 20 {
+			serverText += "_"
+		}
+		clientui.DrawText(screen, serverText, serverRect.Min.X+10, serverRect.Min.Y+18, theme.Text)
+	}
+
 	footer := "Please wait"
 	if connectError != "" {
-		footer = "Press Enter or R to try again"
+		footer = "Edit server, then press Enter or R to try again"
 	}
 	clientui.DrawTextCentered(screen, footer, image.Rect(rect.Min.X+20, rect.Max.Y-34, rect.Max.X-20, rect.Max.Y-14), theme.TextDim)
 	spinnerRect := image.Rect(rect.Min.X+rect.Dx()/2-44, rect.Min.Y+88, rect.Min.X+rect.Dx()/2+44, rect.Min.Y+104)
+	if connectError != "" {
+		spinnerRect = image.Rect(rect.Min.X+rect.Dx()/2-44, rect.Min.Y+132, rect.Min.X+rect.Dx()/2+44, rect.Min.Y+148)
+	}
 	overlay.DrawPulseBar(screen, spinnerRect, theme, ticks)
 	clientui.DrawTextCentered(screen, "Endless Offline Native Client", image.Rect(0, sh-38, sw, sh-18), theme.TextDim)
 }
@@ -236,6 +266,11 @@ func HandleClick(layout Layout, mx, my int, mode AuthMode) (newMode AuthMode, ne
 		return mode, FocusEmail, "focus"
 	case mode == ModeCreateAccount && overlay.PointInRect(mx, my, layout.AddressRect):
 		return mode, FocusAddress, "focus"
+	case overlay.PointInRect(mx, my, layout.ServerRect):
+		if mode == ModeCredits || mode == ModeHome {
+			return mode, -1, "absorbed"
+		}
+		return mode, FocusServer, "focus"
 	case overlay.PointInRect(mx, my, layout.SubmitRect):
 		return mode, -1, "submit"
 	default:

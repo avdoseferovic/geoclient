@@ -1,0 +1,50 @@
+version: 2
+
+project_name: geoclient
+
+dist: .build/goreleaser
+
+before:
+  hooks:
+    - go test ./cmd/eoclient ./internal/game
+
+builds:
+  - id: geoclient
+    main: ./cmd/eoclient
+    binary: geoclient
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.clientVersion={{ .Version }}
+      - -X main.defaultServerAddr={{ .Env.SERVER_ADDR }}
+      - -X main.defaultAssetBase={{ .Env.ASSET_BASE_URL }}
+      - -X main.defaultUpdateManifestURL={{ .Env.UPDATE_MANIFEST_URL }}
+      - -X main.defaultUpdatePublicKey={{ .Env.UPDATE_PUBLIC_KEY }}
+
+archives:
+  - id: geoclient
+    ids:
+      - geoclient
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        format: zip
+    name_template: >-
+      {{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  disable: true

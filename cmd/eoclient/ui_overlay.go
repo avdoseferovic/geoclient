@@ -26,6 +26,7 @@ type overlayState struct {
 	loginPassword2      []rune
 	loginEmail          []rune
 	loginAddress        []rune
+	loginServerAddr     []rune
 	loginFocus          int
 	loginSubmitting     bool
 	previewDirection    int
@@ -79,7 +80,19 @@ func (g *Game) updateOverlayState() {
 		}
 	}
 	if g.client.GetState() == game.StateInitial && g.connectError != "" {
+		if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) && len(g.overlay.loginServerAddr) > 0 {
+			g.overlay.loginServerAddr = g.overlay.loginServerAddr[:len(g.overlay.loginServerAddr)-1]
+		}
+		for _, r := range ebiten.AppendInputChars(nil) {
+			if r < 32 || r > 126 || len(g.overlay.loginServerAddr) >= 128 {
+				continue
+			}
+			g.overlay.loginServerAddr = append(g.overlay.loginServerAddr, r)
+		}
 		if inpututil.IsKeyJustPressed(ebiten.KeyR) || inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
+			if _, ok := g.applyServerAddressInput(); !ok {
+				return
+			}
 			g.connected = false
 			g.connectArmed = true
 			g.connectError = ""
@@ -93,7 +106,7 @@ func (g *Game) drawOverlayScreen(screen *ebiten.Image) {
 	switch g.client.GetState() {
 	case game.StateInitial:
 		clientui.DrawBackdrop(screen, theme, g.overlay.ticks)
-		login.DrawConnecting(screen, theme, g.screenW, g.screenH, g.overlay.ticks, g.overlay.statusMessage, g.connectError)
+		login.DrawConnecting(screen, theme, g.screenW, g.screenH, g.overlay.ticks, g.overlay.statusMessage, g.connectError, g.overlay.loginServerAddr, true)
 	case game.StateConnected:
 		clientui.DrawBackdrop(screen, theme, g.overlay.ticks)
 		g.drawLoginDialog(screen, theme)

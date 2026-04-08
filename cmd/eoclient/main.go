@@ -22,6 +22,10 @@ import (
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
+	if maybeApplyDesktopBinaryUpdate() {
+		return
+	}
+
 	cfg := loadRuntimeConfig()
 
 	loader := gfx.NewLoaderWithReader(cfg.gfxDir, cfg.assetReader)
@@ -63,7 +67,9 @@ func main() {
 		chat:                newChatState(),
 		connectArmed:        true,
 		serverAddr:          cfg.serverAddr,
+		serverConfigKey:     cfg.serverConfigKey,
 	}
+	g.overlay.loginServerAddr = []rune(cfg.serverAddr)
 	game.RegisterAllHandlers(g.handlers)
 	if itemDB != nil {
 		g.client.ItemTypeFunc = func(id int) int {
@@ -102,6 +108,7 @@ type Game struct {
 	overlay             overlayState
 	autoWalk            autoWalkPlan
 	serverAddr          string
+	serverConfigKey     string
 
 	connected    bool
 	connectArmed bool

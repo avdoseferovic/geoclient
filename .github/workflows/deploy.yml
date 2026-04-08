@@ -1,0 +1,146 @@
+name: Build And Deploy Geoclient
+
+on:
+  workflow_dispatch:
+    inputs:
+      client_version:
+        description: Release version for native/web clients
+        required: false
+      asset_version:
+        description: Immutable asset version label
+        required: false
+      asset_base_url:
+        description: Full remote asset base URL override
+        required: false
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+      SERVER_ADDR: ${{ vars.SERVER_ADDR }}
+      ASSET_PUBLIC_BASE: ${{ vars.ASSET_PUBLIC_BASE }}
+      UPDATE_MANIFEST_URL: ${{ vars.UPDATE_MANIFEST_URL }}
+      UPDATE_PUBLIC_KEY: ${{ vars.UPDATE_PUBLIC_KEY }}
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+      DOKPLOY_DEPLOY_HOOK_URL: ${{ secrets.DOKPLOY_DEPLOY_HOOK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y rsync zip
+
+      - name: Compute release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse --short HEAD)"
+          tag="${GITHUB_REF_NAME:-}"
+          client_version="${{ github.event.inputs.client_version }}"
+          asset_version="${{ github.event.inputs.asset_version }}"
+          asset_base_url="${{ github.event.inputs.asset_base_url }}"
+
+          if [[ -z "$client_version" ]]; then
+            if [[ "$GITHUB_REF_TYPE" == "tag" && -n "$tag" ]]; then
+              client_version="$tag"
+            else
+              client_version="$sha"
+            fi
+          fi
+          if [[ -z "$asset_version" ]]; then
+            if [[ "$GITHUB_REF_TYPE" == "tag" && -n "$tag" ]]; then
+              asset_version="$tag"
+            else
+              asset_version="$sha"
+            fi
+          fi
+          if [[ -z "$asset_base_url" ]]; then
+            asset_base_url="${ASSET_PUBLIC_BASE%/}/$asset_version"
+          fi
+
+          echo "client_version=$client_version" >> "$GITHUB_OUTPUT"
+          echo "asset_version=$asset_version" >> "$GITHUB_OUTPUT"
+          echo "asset_base_url=$asset_base_url" >> "$GITHUB_OUTPUT"
+          echo "build_commit=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Configure SSH
+        if: env.DEPLOY_HOST != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          touch ~/.ssh/known_hosts
+          if [[ -n "$DEPLOY_HOST" ]]; then
+            ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          fi
+
+      - name: Build web bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x scripts/build-web.sh scripts/assemble-release.sh
+          WEB_DIR="$PWD/.build/web" ./scripts/build-web.sh
+
+      - name: Build native archives with GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean --snapshot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SERVER_ADDR: ${{ env.SERVER_ADDR }}
+          ASSET_BASE_URL: ${{ steps.meta.outputs.asset_base_url }}
+          UPDATE_MANIFEST_URL: ${{ env.UPDATE_MANIFEST_URL }}
+          UPDATE_PUBLIC_KEY: ${{ env.UPDATE_PUBLIC_KEY }}
+
+      - name: Assemble Dokploy bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          CLIENT_VERSION="${{ steps.meta.outputs.client_version }}" \
+          ASSET_VERSION="${{ steps.meta.outputs.asset_version }}" \
+          ASSET_BASE_URL="${{ steps.meta.outputs.asset_base_url }}" \
+          BUILD_COMMIT="${{ steps.meta.outputs.build_commit }}" \
+          SERVER_ADDR="$SERVER_ADDR" \
+          PUBLIC_BASE_URL="$PUBLIC_BASE_URL" \
+          UPDATE_MANIFEST_URL="$UPDATE_MANIFEST_URL" \
+          UPDATE_PUBLIC_KEY="$UPDATE_PUBLIC_KEY" \
+          WEB_BUILD_DIR="$PWD/.build/web" \
+          RELEASES_DIR="$PWD/.build/goreleaser" \
+          ./scripts/assemble-release.sh
+
+      - name: Upload release bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: geoclient-dist-${{ steps.meta.outputs.client_version }}
+          path: dist
+
+      - name: Sync bundle to Dokploy host
+        if: env.DEPLOY_HOST != '' && env.DEPLOY_USER != '' && env.DEPLOY_PATH != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          rsync -az --delete dist/ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+
+      - name: Trigger Dokploy deploy hook
+        if: env.DOKPLOY_DEPLOY_HOOK_URL != ''
+        run: curl -fsSL -X POST "$DOKPLOY_DEPLOY_HOOK_URL"

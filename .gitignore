@@ -15,3 +15,8 @@
 /webclient
 /web/eoclient.wasm
 /web/wasm_exec.js
+/dist/
+/.build/
+
+inventory-layout.json
+server-config.json
