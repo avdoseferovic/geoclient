@@ -10,9 +10,9 @@ import (
 	"github.com/ethanmoffat/eolib-go/v3/protocol/net/server"
 	"github.com/hajimehoshi/ebiten/v2"
 
-	"github.com/avdo/eoweb/internal/render"
-	clientui "github.com/avdo/eoweb/internal/ui"
-	"github.com/avdo/eoweb/internal/ui/overlay"
+	"github.com/avdoseferovic/geoclient/internal/render"
+	clientui "github.com/avdoseferovic/geoclient/internal/ui"
+	"github.com/avdoseferovic/geoclient/internal/ui/overlay"
 )
 
 const (

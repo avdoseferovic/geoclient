@@ -6,15 +6,19 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
 func main() {
 	var (
-		filePath   = flag.String("file", "", "file to sign")
-		outPath    = flag.String("out", "", "signature output path")
-		privateKey = flag.String("private-key", "", "base64 ed25519 private key")
+		filePath     = flag.String("file", "", "file to sign")
+		outPath      = flag.String("out", "", "signature output path")
+		privateKey   = flag.String("private-key", "", "base64 ed25519 private key")
+		keychainSvc  = flag.String("keychain-service", firstNonEmpty(os.Getenv("EO_UPDATE_PRIVATE_KEY_KEYCHAIN_SERVICE"), "geoclient-update-private-key"), "macOS Keychain service name")
+		keychainAcct = flag.String("keychain-account", firstNonEmpty(os.Getenv("EO_UPDATE_PRIVATE_KEY_KEYCHAIN_ACCOUNT"), os.Getenv("USER")), "macOS Keychain account name")
 	)
 	flag.Parse()
 
@@ -22,7 +26,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, "--file is required")
 		os.Exit(1)
 	}
-	key := firstNonEmpty(*privateKey, os.Getenv("EO_UPDATE_PRIVATE_KEY"))
+	key, err := resolvePrivateKey(*privateKey, *keychainSvc, *keychainAcct)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	if key == "" {
 		fmt.Fprintln(os.Stderr, "private key not provided")
 		os.Exit(1)
@@ -56,6 +64,24 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func resolvePrivateKey(flagValue, keychainService, keychainAccount string) (string, error) {
+	if key := firstNonEmpty(flagValue, os.Getenv("EO_UPDATE_PRIVATE_KEY")); key != "" {
+		return key, nil
+	}
+	if runtime.GOOS != "darwin" {
+		return "", nil
+	}
+	if strings.TrimSpace(keychainService) == "" || strings.TrimSpace(keychainAccount) == "" {
+		return "", nil
+	}
+	cmd := exec.Command("security", "find-generic-password", "-a", keychainAccount, "-s", keychainService, "-w")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("private key not provided and macOS Keychain lookup failed for service %q", keychainService)
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 func firstNonEmpty(values ...string) string {

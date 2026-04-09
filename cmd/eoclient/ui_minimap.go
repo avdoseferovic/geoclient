@@ -6,10 +6,10 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 
-	"github.com/avdo/eoweb/internal/game"
-	"github.com/avdo/eoweb/internal/render"
-	clientui "github.com/avdo/eoweb/internal/ui"
-	"github.com/avdo/eoweb/internal/ui/hud"
+	"github.com/avdoseferovic/geoclient/internal/game"
+	"github.com/avdoseferovic/geoclient/internal/render"
+	clientui "github.com/avdoseferovic/geoclient/internal/ui"
+	"github.com/avdoseferovic/geoclient/internal/ui/hud"
 )
 
 func (g *Game) drawMinimap(screen *ebiten.Image, theme clientui.Theme, rect image.Rectangle, snapshot game.UISnapshot) {

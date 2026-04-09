@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/avdo/eoweb/internal/releaseauth"
+	"github.com/avdoseferovic/geoclient/internal/releaseauth"
 )
 
 type verifiedAssetManifest struct {

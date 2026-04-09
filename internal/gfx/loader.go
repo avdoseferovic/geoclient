@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/avdo/eoweb/internal/assets"
+	"github.com/avdoseferovic/geoclient/internal/assets"
 	ebimg "github.com/hajimehoshi/ebiten/v2"
 )
 

@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/avdo/eoweb/internal/movement"
+	"github.com/avdoseferovic/geoclient/internal/movement"
 )
 
 func TestBlockedTileSpecMatchesReferenceWalkBlockers(t *testing.T) {

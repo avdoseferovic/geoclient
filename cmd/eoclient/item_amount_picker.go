@@ -7,8 +7,8 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 
-	clientui "github.com/avdo/eoweb/internal/ui"
-	"github.com/avdo/eoweb/internal/ui/overlay"
+	clientui "github.com/avdoseferovic/geoclient/internal/ui"
+	"github.com/avdoseferovic/geoclient/internal/ui/overlay"
 )
 
 type itemAmountPickerState struct {

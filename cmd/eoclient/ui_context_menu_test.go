@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
-	"github.com/avdo/eoweb/internal/game"
-	"github.com/avdo/eoweb/internal/render"
+	"github.com/avdoseferovic/geoclient/internal/game"
+	"github.com/avdoseferovic/geoclient/internal/render"
 )
 
 func TestPlayerContextMenuTargetUsesFullCharacterHoverRect(t *testing.T) {

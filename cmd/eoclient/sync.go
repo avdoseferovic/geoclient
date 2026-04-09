@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/avdo/eoweb/internal/game"
-	"github.com/avdo/eoweb/internal/render"
+	"github.com/avdoseferovic/geoclient/internal/game"
+	"github.com/avdoseferovic/geoclient/internal/render"
 )
 
 // syncEntities copies nearby entity data from game state into the map renderer.

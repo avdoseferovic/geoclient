@@ -3,7 +3,6 @@ package game
 import (
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 
 	"github.com/ethanmoffat/eolib-go/v3/protocol/net/client"
@@ -131,17 +130,4 @@ func handleInitFilePub(c *Client, fileType client.FileType, content []byte) erro
 	}
 	c.Emit(Event{Type: EventFileUpdated, Data: fileType})
 	return c.requestNextFile()
-}
-
-func saveFile(path string, content []byte) error {
-	if path == "" {
-		return nil
-	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-
-	slog.Info("saving file", "path", path, "size", len(content))
-	return os.WriteFile(path, content, 0o644)
 }

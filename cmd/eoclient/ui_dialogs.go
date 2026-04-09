@@ -6,8 +6,8 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 
-	"github.com/avdo/eoweb/internal/game"
-	"github.com/avdo/eoweb/internal/ui/overlay"
+	"github.com/avdoseferovic/geoclient/internal/game"
+	"github.com/avdoseferovic/geoclient/internal/ui/overlay"
 )
 
 // updateDialogs handles input for modal dialogs (chest, trade, party invite).

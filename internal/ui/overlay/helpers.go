@@ -8,7 +8,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 
-	clientui "github.com/avdo/eoweb/internal/ui"
+	clientui "github.com/avdoseferovic/geoclient/internal/ui"
 )
 
 func PointInRect(x, y int, rect image.Rectangle) bool {

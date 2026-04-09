@@ -6,9 +6,9 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 
-	"github.com/avdo/eoweb/internal/render"
-	clientui "github.com/avdo/eoweb/internal/ui"
-	"github.com/avdo/eoweb/internal/ui/overlay"
+	"github.com/avdoseferovic/geoclient/internal/render"
+	clientui "github.com/avdoseferovic/geoclient/internal/ui"
+	"github.com/avdoseferovic/geoclient/internal/ui/overlay"
 )
 
 func (g *Game) drawItemTooltip(screen *ebiten.Image, theme clientui.Theme, mx, my, itemID, amount int) {

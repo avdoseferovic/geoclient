@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/avdo/eoweb/internal/releaseauth"
+	"github.com/avdoseferovic/geoclient/internal/releaseauth"
 )
 
 func resolveRemoteUpdateManifest(url, publicKey string) *updateManifest {

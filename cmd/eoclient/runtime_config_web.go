@@ -7,7 +7,7 @@ import (
 	"strings"
 	"syscall/js"
 
-	"github.com/avdo/eoweb/internal/assets"
+	"github.com/avdoseferovic/geoclient/internal/assets"
 )
 
 func loadRuntimeConfig() runtimeConfig {
@@ -50,7 +50,7 @@ func loadRuntimeConfig() runtimeConfig {
 		itemPubPath:     "pub/dat001.eif",
 		npcPubPath:      "pub/dtn001.enf",
 		layoutPath:      "inventory-layout.json",
-		assetReader:     assets.NewVerifiedHTTPReader(assetBase, updatePublicKey()),
+		assetReader:     assets.NewWebCachedReader(assets.NewVerifiedHTTPReader(assetBase, updatePublicKey())),
 		windowTitle:     "EO Client Web",
 		defaultWidth:    640,
 		defaultHeight:   480,

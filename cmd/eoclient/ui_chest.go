@@ -6,8 +6,8 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 
-	clientui "github.com/avdo/eoweb/internal/ui"
-	"github.com/avdo/eoweb/internal/ui/overlay"
+	clientui "github.com/avdoseferovic/geoclient/internal/ui"
+	"github.com/avdoseferovic/geoclient/internal/ui/overlay"
 )
 
 func (g *Game) chestDialogRect() image.Rectangle {

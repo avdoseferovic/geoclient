@@ -10,8 +10,8 @@ import (
 	netclient "github.com/ethanmoffat/eolib-go/v3/protocol/net/client"
 	"github.com/ethanmoffat/eolib-go/v3/protocol/net/server"
 
-	"github.com/avdo/eoweb/internal/assets"
-	"github.com/avdo/eoweb/internal/net"
+	"github.com/avdoseferovic/geoclient/internal/assets"
+	"github.com/avdoseferovic/geoclient/internal/net"
 )
 
 type GameState int

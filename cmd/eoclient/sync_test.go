@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/avdo/eoweb/internal/game"
-	"github.com/avdo/eoweb/internal/pubdata"
+	"github.com/avdoseferovic/geoclient/internal/game"
+	"github.com/avdoseferovic/geoclient/internal/pubdata"
 )
 
 func TestGroundItemGraphicIDUsesItemMetadata(t *testing.T) {

@@ -9,13 +9,13 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 
-	"github.com/avdo/eoweb/internal/game"
-	"github.com/avdo/eoweb/internal/gfx"
-	"github.com/avdo/eoweb/internal/movement"
-	eonet "github.com/avdo/eoweb/internal/net"
-	"github.com/avdo/eoweb/internal/pubdata"
-	"github.com/avdo/eoweb/internal/render"
-	"github.com/avdo/eoweb/internal/ui/overlay"
+	"github.com/avdoseferovic/geoclient/internal/game"
+	"github.com/avdoseferovic/geoclient/internal/gfx"
+	"github.com/avdoseferovic/geoclient/internal/movement"
+	eonet "github.com/avdoseferovic/geoclient/internal/net"
+	"github.com/avdoseferovic/geoclient/internal/pubdata"
+	"github.com/avdoseferovic/geoclient/internal/render"
+	"github.com/avdoseferovic/geoclient/internal/ui/overlay"
 	"github.com/ethanmoffat/eolib-go/v3/protocol/pub"
 )
 

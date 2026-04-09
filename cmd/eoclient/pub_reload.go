@@ -3,7 +3,7 @@ package main
 import (
 	"log/slog"
 
-	"github.com/avdo/eoweb/internal/pubdata"
+	"github.com/avdoseferovic/geoclient/internal/pubdata"
 	"github.com/ethanmoffat/eolib-go/v3/protocol/net/client"
 )
 

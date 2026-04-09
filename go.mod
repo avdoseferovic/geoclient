@@ -1,4 +1,4 @@
-module github.com/avdo/eoweb
+module github.com/avdoseferovic/geoclient
 
 go 1.25.0
 

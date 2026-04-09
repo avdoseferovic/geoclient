@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/avdo/eoweb/internal/game"
+	"github.com/avdoseferovic/geoclient/internal/game"
 )
 
 func TestGroundItemHoverData(t *testing.T) {

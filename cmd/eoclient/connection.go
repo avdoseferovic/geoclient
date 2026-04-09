@@ -5,10 +5,10 @@ import (
 	"log/slog"
 	"math/rand/v2"
 
-	"github.com/avdo/eoweb/internal/game"
-	eonet "github.com/avdo/eoweb/internal/net"
-	"github.com/avdo/eoweb/internal/ui/login"
-	"github.com/avdo/eoweb/internal/ui/overlay"
+	"github.com/avdoseferovic/geoclient/internal/game"
+	eonet "github.com/avdoseferovic/geoclient/internal/net"
+	"github.com/avdoseferovic/geoclient/internal/ui/login"
+	"github.com/avdoseferovic/geoclient/internal/ui/overlay"
 	"github.com/ethanmoffat/eolib-go/v3/protocol/net/client"
 )
 

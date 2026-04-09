@@ -96,7 +96,9 @@ func downloadAndVerifyArchive(client *http.Client, download updateDownload) ([]b
 	if err != nil {
 		return nil, fmt.Errorf("download archive: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("download archive: unexpected status %s", resp.Status)
 	}
@@ -132,7 +134,9 @@ func extractZipBinary(data []byte, wantExe bool) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer rc.Close()
+		defer func() {
+			_ = rc.Close()
+		}()
 		return io.ReadAll(rc)
 	}
 	return nil, fmt.Errorf("binary not found in zip archive")
@@ -143,7 +147,9 @@ func extractTarGzBinary(data []byte, wantExe bool) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer gzipReader.Close()
+	defer func() {
+		_ = gzipReader.Close()
+	}()
 	tarReader := tar.NewReader(gzipReader)
 	for {
 		header, err := tarReader.Next()

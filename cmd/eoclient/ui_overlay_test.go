@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/avdo/eoweb/internal/ui/overlay"
+	"github.com/avdoseferovic/geoclient/internal/ui/overlay"
 )
 
 func TestTnlProgress(t *testing.T) {

@@ -62,7 +62,7 @@ func (g *Game) sendCharacterCreateRequest() {
 		return
 	}
 	slog.Info("requesting character creation")
-	if err := bus.SendSequenced(&client.CharacterRequestClientPacket{}); err != nil {
+	if err := bus.SendSequenced(&client.CharacterRequestClientPacket{RequestString: "NEW"}); err != nil {
 		slog.Error("send character request failed", "err", err)
 	}
 }

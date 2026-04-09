@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/avdo/eoweb/internal/movement"
+	"github.com/avdoseferovic/geoclient/internal/movement"
 )
 
 const (

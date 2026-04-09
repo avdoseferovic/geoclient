@@ -11,7 +11,7 @@ import (
 	"github.com/ethanmoffat/eolib-go/v3/protocol/net/client"
 	"github.com/ethanmoffat/eolib-go/v3/protocol/net/server"
 
-	internalnet "github.com/avdo/eoweb/internal/net"
+	internalnet "github.com/avdoseferovic/geoclient/internal/net"
 )
 
 type fakePacketConn struct {

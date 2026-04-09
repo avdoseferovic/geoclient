@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/avdo/eoweb/internal/assets"
+	"github.com/avdoseferovic/geoclient/internal/assets"
 )
 
 func TestLoadRuntimeConfigManifestOverridesEmbeddedDefaults(t *testing.T) {

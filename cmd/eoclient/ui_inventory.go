@@ -5,9 +5,9 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 
-	"github.com/avdo/eoweb/internal/game"
-	"github.com/avdo/eoweb/internal/ui/hud"
-	"github.com/avdo/eoweb/internal/ui/overlay"
+	"github.com/avdoseferovic/geoclient/internal/game"
+	"github.com/avdoseferovic/geoclient/internal/ui/hud"
+	"github.com/avdoseferovic/geoclient/internal/ui/overlay"
 )
 
 func (g *Game) handleInGameOverlayClick() bool {

@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/avdo/eoweb/internal/movement"
-	"github.com/avdo/eoweb/internal/render"
+	"github.com/avdoseferovic/geoclient/internal/movement"
+	"github.com/avdoseferovic/geoclient/internal/render"
 )
 
 const (

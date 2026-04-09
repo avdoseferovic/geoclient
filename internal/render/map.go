@@ -11,8 +11,8 @@ import (
 	eomap "github.com/ethanmoffat/eolib-go/v3/protocol/map"
 	"github.com/hajimehoshi/ebiten/v2"
 
-	"github.com/avdo/eoweb/internal/assets"
-	"github.com/avdo/eoweb/internal/gfx"
+	"github.com/avdoseferovic/geoclient/internal/assets"
+	"github.com/avdoseferovic/geoclient/internal/gfx"
 )
 
 const (

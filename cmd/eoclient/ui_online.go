@@ -6,8 +6,8 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 
-	"github.com/avdo/eoweb/internal/game"
-	clientui "github.com/avdo/eoweb/internal/ui"
+	"github.com/avdoseferovic/geoclient/internal/game"
+	clientui "github.com/avdoseferovic/geoclient/internal/ui"
 )
 
 func (g *Game) drawOnlinePanel(screen *ebiten.Image, theme clientui.Theme, rect image.Rectangle) {

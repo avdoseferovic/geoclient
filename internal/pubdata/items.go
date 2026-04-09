@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/avdo/eoweb/internal/assets"
+	"github.com/avdoseferovic/geoclient/internal/assets"
 	"github.com/ethanmoffat/eolib-go/v3/data"
 	"github.com/ethanmoffat/eolib-go/v3/protocol/pub"
 )

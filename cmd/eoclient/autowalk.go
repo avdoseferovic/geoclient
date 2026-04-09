@@ -1,6 +1,6 @@
 package main
 
-import "github.com/avdo/eoweb/internal/movement"
+import "github.com/avdoseferovic/geoclient/internal/movement"
 
 type autoWalkPlan = movement.AutoWalkPlan
 

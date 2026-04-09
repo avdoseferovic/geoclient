@@ -1,6 +1,6 @@
 package main
 
-import "github.com/avdo/eoweb/internal/assets"
+import "github.com/avdoseferovic/geoclient/internal/assets"
 
 type runtimeConfig struct {
 	serverAddr      string

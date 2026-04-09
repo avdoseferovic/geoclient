@@ -5,7 +5,7 @@ package main
 import (
 	"os"
 
-	"github.com/avdo/eoweb/internal/assets"
+	"github.com/avdoseferovic/geoclient/internal/assets"
 )
 
 var desktopServerConfigKey = "server-config.json"

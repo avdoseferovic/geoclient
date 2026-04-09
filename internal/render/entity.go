@@ -8,7 +8,7 @@ import (
 	textv2 "github.com/hajimehoshi/ebiten/v2/text/v2"
 	"golang.org/x/image/font/basicfont"
 
-	"github.com/avdo/eoweb/internal/gfx"
+	"github.com/avdoseferovic/geoclient/internal/gfx"
 )
 
 // WalkWidthFactor is the pixel offset per walk frame horizontally.
@@ -342,11 +342,12 @@ func renderHat(screen *ebiten.Image, loader *gfx.Loader, ch *CharacterEntity, fr
 
 func hatDrawPosition(bodyX, bodyY float64, bodyW, bodyH, hatW, hatH int, offset attachmentOffset, mirrored bool) (float64, float64) {
 	// Hats are anchored against the full 100x100 character frame in the reference client,
-	// not against the cropped body sprite's top edge.
+	// not against the cropped body sprite's top edge. The horizontal offset is centered
+	// on the frame, while the vertical offset is measured from the frame's top edge.
 	frameTopX := bodyX - float64(halfCharacterFrameSize) + float64(bodyW)/2
 	frameTopY := bodyY - float64(halfCharacterFrameSize) + float64(bodyH)/2
 	x := frameTopX + float64(halfCharacterFrameSize-hatW/2) + offset.X
-	y := frameTopY - float64(hatH)/2 + offset.Y
+	y := frameTopY + offset.Y
 	if mirrored {
 		attachmentRight := (x - bodyX) + float64(hatW)
 		x = bodyX + float64(bodyW) - attachmentRight
