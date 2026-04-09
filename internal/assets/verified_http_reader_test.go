@@ -19,7 +19,7 @@ func TestVerifiedHTTPReaderReadFile(t *testing.T) {
 	}
 	asset := []byte("map-data")
 	sum := sha256.Sum256(asset)
-	manifest := []byte(fmt.Sprintf(`{"files":[{"path":"maps/00001.emf","sha256":"%s"}]}`, hex.EncodeToString(sum[:])))
+	manifest := fmt.Appendf(nil, `{"files":[{"path":"maps/00001.emf","sha256":"%s"}]}`, hex.EncodeToString(sum[:]))
 	signature := base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, manifest))
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
